@@ -41,6 +41,14 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    # `cl-regex-kit/cli` (cli/main.lisp) -- the cl-regex-kit-grep example
+    # executable -- depends on it directly for argument parsing, with no
+    # adapter layer.
+    cl-cli = {
+      url = "github:nerima-lisp/cl-cli/v1.1.0";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     treefmt-nix = {
       url = "github:numtide/treefmt-nix";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -54,6 +62,7 @@
       cl-nix-forge,
       cl-weave,
       cl-parser-kit,
+      cl-cli,
       treefmt-nix,
     }:
     let
@@ -154,6 +163,22 @@
       # check` evaluates each attribute as its own derivation, in parallel,
       # with build caching.
       extraOutputs = ctx: {
+        packages.cl-regex-kit-grep = ctx.cl.mkExecutable {
+          args = {
+            pname = "cl-regex-kit-grep";
+            lispSystem = "cl-regex-kit/cli";
+            version = ctx.cl.fromAsdSystem ./cl-regex-kit.asd;
+            src = ctx.cl.mkLispSource { root = ./.; };
+            # cl-regex-kit itself is a sibling lispDependencies edge, exactly
+            # like cl-parser-kit is for the main package above; cl-cli is
+            # the one new dependency this executable adds.
+            lispDependencies = [
+              ctx.package
+              cl-cli.packages.${ctx.system}.cl-cli
+            ];
+          };
+        };
+
         checks.coverage = ctx.cl.mkCommandCheck {
           # `.enableCheck`, not `ctx.package`: the coverage run loads
           # `cl-regex-kit/test`, which needs `lispCheckDependencies` (cl-weave)

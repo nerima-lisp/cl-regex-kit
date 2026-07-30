@@ -37,6 +37,25 @@
    (:file "regex-set"))
   :in-order-to ((test-op (test-op "cl-regex-kit/test"))))
 
+(asdf:defsystem "cl-regex-kit/cli"
+  :description "cl-regex-kit-grep: a small grep built directly on cl-regex-kit"
+  :author "takeokunn <bararararatty@gmail.com>"
+  :maintainer "takeokunn <bararararatty@gmail.com>"
+  :license "MIT"
+  :version "0.1.0"
+  :homepage "https://github.com/nerima-lisp/cl-regex-kit"
+  :bug-tracker "https://github.com/nerima-lisp/cl-regex-kit/issues"
+  :source-control (:git "https://github.com/nerima-lisp/cl-regex-kit.git")
+  :depends-on ("cl-regex-kit" "cl-cli")
+  :pathname "cli"
+  :serial t
+  :components
+  ((:file "package")
+   (:file "main"))
+  :build-operation "program-op"
+  :build-pathname "cl-regex-kit-grep"
+  :entry-point "cl-regex-kit/cli:main")
+
 (asdf:defsystem "cl-regex-kit/test"
   :description "Test system for cl-regex-kit"
   :author "takeokunn <bararararatty@gmail.com>"
