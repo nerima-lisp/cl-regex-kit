@@ -35,6 +35,7 @@
   (let ((newline (string #\Newline)))
     (expect (scan (compile-regex "(?s:.)" :never-newline t) newline) :to-be nil)
     (expect (scan (compile-regex newline :never-newline t) newline) :to-be nil)
+    (expect (scan (compile-regex "\\012" :never-newline t) newline) :to-be nil)
     (expect (scan (compile-regex "[[:space:]]" :never-newline t) newline) :to-be nil)
     (expect (scan (compile-regex "(?s:.)" :never-newline t) "x") :to-be-truthy)
     (expect (regex-set-matches
@@ -47,6 +48,8 @@
                        :initial-contents values)))
     (expect (scan (compile-byte-regex "\\C" :never-newline t) (octets #x0a))
             :to-be nil)
+    (expect (scan (compile-byte-regex "\\x0A" :never-newline t) (octets #x0a))
+            :to-be nil)
     (expect (scan (compile-byte-regex "\\C" :never-newline t) (octets #x41))
             :to-be-truthy)
     (expect (regex-set-match-p
@@ -56,14 +59,45 @@
   (signals type-error (compile-regex "a" :never-newline :enabled)))
 
 (it
-  "supports Rust CRLF mode without matching inside CRLF"
+  "supports CRLF and custom line terminators without matching inside CRLF"
   (let ((text (format nil "~C~Cfoo~C~C" #\Return #\Newline #\Return #\Newline))
         (cr (string #\Return))
         (crlf (format nil "~C~C" #\Return #\Newline)))
     (expect (match-string (match "(?mR)^foo$" text) text) :to-equal "foo")
     (expect (match "(?mR)^\\n" crlf) :to-be nil)
     (expect (match "." cr) :not :to-be nil)
-    (expect (match "(?R)." cr) :to-be nil)))
+    (expect (match "(?R)." cr) :to-be nil))
+  (let ((text ";foo;bar"))
+    (expect
+      (match-string
+        (scan (compile-regex "^foo$" :multi-line t :line-terminator #\;) text)
+        text)
+      :to-equal
+      "foo"))
+  (let* ((text (make-array 9
+                           :element-type '(unsigned-byte 8)
+                           :initial-contents '(59 102 111 111 59 98 97 114 59)))
+         (result
+           (scan (compile-byte-regex "^foo$" :multi-line t :line-terminator #\;) text)))
+    (expect (match-start result) :to-equal 1)
+    (expect (match-end result) :to-equal 4))
+  (flet ((octets (&rest values)
+           (make-array (length values)
+                       :element-type '(unsigned-byte 8)
+                       :initial-contents values)))
+    (let ((regex (compile-byte-regex "^foo$" :multi-line t :line-terminator #xff)))
+      (expect (scan regex (octets #xff 102 111 111 #xff)) :to-be-truthy)
+      (expect (regex-set-matches
+               (compile-byte-regex-set '("^foo$")
+                                       :multi-line t :line-terminator #xff)
+               (octets #xff 102 111 111 #xff))
+              :to-equal
+              '(0)))
+    (let ((regex (compile-byte-regex "(?-u:.)" :line-terminator #xff)))
+      (expect (scan regex (octets #xff)) :to-be-null)
+      (expect (scan regex (octets #x80)) :to-be-truthy)))
+  (signals type-error (compile-regex "." :line-terminator #xff))
+  (signals type-error (compile-byte-regex "." :line-terminator 256)))
 
 (it
   "supports all POSIX classes, class set operations, and extended mode"
@@ -139,6 +173,16 @@
       "a-bcdf-e")
     :to-equal
     "bcdf")
+  (expect (match-string (match "(?x)a{ 2 }" "--aa--") "--aa--") :to-equal "aa")
+  (expect (match-string (match "(?x)\\x{ 6 1 }+" "--aaa--") "--aaa--") :to-equal "aaa")
+  (expect (match-string (match "(?x)\\p{ L e t t e r }+" "--abc--") "--abc--")
+        :to-equal "abc")
+  (expect (match-string (match "(?x)\\b{ s t a r t }foo" " foo food") " foo food")
+          :to-equal "foo")
+  (let ((pattern (format nil "(?x)\\b{ start # ignored~% }foo")))
+    (expect (match-string (match pattern " foo food") " foo food")
+            :to-equal "foo"))
+  (expect (match-string (match "\\b{2}" " foo") " foo") :to-equal "")
   (expect (match-string (match "(?x)[\\ ]+" "a  b") "a  b") :to-equal "  ")
   (expect (match-string (match "(?x)[\\#]+" "a##b") "a##b") :to-equal "##"))
 
@@ -204,6 +248,26 @@
     (setf (aref (regex-set-patterns set) 0) "bird")
     (unless (equalp (regex-set-patterns set) #("cat" "dog"))
       (error "REGEX-SET exposed mutable source patterns")))
+  (dolist (compiler (list #'compile-regex #'compile-byte-regex))
+    (let* ((source (copy-seq "cat"))
+           (compiled (funcall compiler source)))
+      (setf (char source 0) #\b)
+      (unless (string= (cl-regex-kit:regex-source compiled) "cat")
+        (error "REGEX retained an alias to its input source"))
+      (let ((exposed (cl-regex-kit:regex-source compiled)))
+        (setf (char exposed 0) #\r)
+        (unless (string= (cl-regex-kit:regex-source compiled) "cat")
+          (error "REGEX exposed mutable source text")))))
+  (dolist (compiler (list #'compile-regex-set #'compile-byte-regex-set))
+    (let* ((source (vector (copy-seq "cat") (copy-seq "dog")))
+           (set (funcall compiler source)))
+      (setf (char (aref source 0) 0) #\b)
+      (unless (equalp (regex-set-patterns set) #("cat" "dog"))
+        (error "REGEX-SET retained aliases to input source strings"))
+      (let ((exposed (regex-set-patterns set)))
+        (setf (char (aref exposed 0) 0) #\r)
+        (unless (equalp (regex-set-patterns set) #("cat" "dog"))
+          (error "REGEX-SET exposed mutable source strings")))))
   (let ((set (regex-set "cat" "dog")))
     (unless (equal (regex-set-matches set "a dog") '(1))
       (error "REGEX-SET macro did not compile its literal patterns")))

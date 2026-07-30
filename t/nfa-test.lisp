@@ -1,8 +1,8 @@
 ;;;; t/nfa-test.lisp
 (in-package #:cl-regex-kit/test)
 
-;; COMPILE-TO-NFA (src/nfa.lisp) has no implementation yet. Replace this
-;; placeholder with real specs once AST nodes compile to an INST program --
-;; one spec per node type is a reasonable starting split.
-(it "signals that it is not yet implemented"
-  (signals error (cl-regex-kit::compile-to-nfa (make-instance 'cl-regex-kit::any-char-node))))
+(it "compiles every supported AST node to a terminating instruction program"
+  (multiple-value-bind (program group-count)
+      (cl-regex-kit::compile-to-nfa (cl-regex-kit::parse-regex "^(a|b)[0-9]{2,3}$") "^(a|b)[0-9]{2,3}$")
+    (expect group-count :to-equal 1)
+    (expect (cl-regex-kit::inst-op (aref program (1- (length program)))) :to-be :match)))

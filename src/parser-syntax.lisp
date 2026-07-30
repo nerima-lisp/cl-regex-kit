@@ -50,3 +50,27 @@
           (if ignore-whitespace +flag-extended+ 0)
           (if unicode +flag-unicode+ 0)
           (if crlf +flag-crlf+ 0)))
+
+(defun update-parser-flag (flags character enabled-p)
+  "Return FLAGS with supported inline flag CHARACTER enabled or disabled."
+  (let ((flag (ecase character
+                (#\i +flag-case-insensitive+)
+                (#\m +flag-multiline+)
+                (#\s +flag-dotall+)
+                (#\U +flag-ungreedy+)
+                (#\x +flag-extended+)
+                (#\u +flag-unicode+)
+                (#\R +flag-crlf+))))
+    (if enabled-p
+        (logior flags flag)
+        (logandc2 flags flag))))
+
+(defmacro with-parser-nesting ((depth limit overflow-form) &body body)
+  "Execute BODY at one parser nesting level and always restore DEPTH."
+  `(progn
+     (when (>= ,depth ,limit)
+       ,overflow-form)
+     (incf ,depth)
+     (unwind-protect
+          (progn ,@body)
+       (decf ,depth))))

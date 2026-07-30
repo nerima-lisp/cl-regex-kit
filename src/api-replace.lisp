@@ -2,11 +2,9 @@
 
 (defun replacement-capture (match-result text designator empty-value)
   (let ((index
-        (cond
-          ((integerp designator) designator)
-          ((stringp designator)
-            (cdr (assoc designator (match-result-group-names match-result) :test #'string=)))
-          (t nil))))
+        (if (integerp designator)
+            designator
+            (cdr (assoc designator (match-result-group-names match-result) :test #'string=)))))
     (if (and
         (integerp index)
         (<= 0 index)
@@ -23,7 +21,10 @@
   (and (< octet 128) (code-char octet)))
 
 (defun replacement-name-character-p (character)
-  (capture-name-character-p character))
+  (or (digit-char-p character)
+      (not (null (find character
+                       "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_"
+                       :test #'char=)))))
 
 (defun replacement-designator (token)
   (if (every #'digit-char-p token) (parse-integer token)
@@ -117,27 +118,17 @@
 
 (defun replacement-string (replacement match-result text)
   (let ((value
-        (cond
-          ((stringp replacement)
-            (expand-replacement-template replacement match-result text))
-          ((functionp replacement) (funcall replacement match-result text))
-          (t (error 'type-error :datum replacement :expected-type '(or string function))))))
+        (if (functionp replacement)
+            (funcall replacement match-result text)
+            (expand-replacement-template replacement match-result text))))
     (check-type value string)
     value))
 
 (defun replacement-octets (replacement match-result text)
   (let ((value
-        (cond
-          ((typep replacement 'octet-vector)
-            (expand-byte-replacement-template replacement match-result text))
-          ((functionp replacement) (funcall replacement match-result text))
-          (t
-            (error
-              'type-error
-              :datum
-              replacement
-              :expected-type
-              '(or octet-vector function))))))
+        (if (functionp replacement)
+            (funcall replacement match-result text)
+            (expand-byte-replacement-template replacement match-result text))))
     (check-type value octet-vector)
     value))
 
@@ -163,11 +154,11 @@
   (if (byte-regex-p regex) (concatenate 'octet-vector prefix replacement suffix)
     (concatenate 'string prefix replacement suffix)))
 
-(defun replace-first (regex text replacement &key (start 0) timeout)
+(defun replace-first (regex text replacement &key (start 0) end timeout)
   "Replace the first match of REGEX in TEXT with REPLACEMENT.
 REPLACEMENT is a Rust-style template string or a function of result and text."
   (validate-replacement regex replacement)
-  (let ((result (scan regex text :start start :timeout timeout)))
+  (let ((result (scan regex text :start start :end end :timeout timeout)))
     (if result (concatenate-replacement
         regex
         (subseq text 0 (match-start result))
@@ -178,11 +169,11 @@ REPLACEMENT is a Rust-style template string or a function of result and text."
 (defun valid-replacement-limit-p (limit)
   (or (null limit) (and (integerp limit) (not (minusp limit)))))
 
-(defun replace-up-to (regex text replacement limit start timeout)
+(defun replace-up-to (regex text replacement limit start end timeout)
   (unless (valid-replacement-limit-p limit)
     (error 'type-error :datum limit :expected-type '(or null (integer 0 *))))
   (check-type regex regex)
-  (validate-text-and-start regex text start)
+  (validate-text-range regex text start end)
   (validate-timeout timeout)
   (validate-replacement regex replacement)
   (when (zerop (or limit 1))
@@ -195,7 +186,7 @@ REPLACEMENT is a Rust-style template string or a function of result and text."
                  (loop for octet across octets
                   do (vector-push-extend octet output))))
         (do-matches
-          (result regex text :start start :timeout timeout)
+          (result regex text :start start :end end :timeout timeout)
           (when (and limit (>= replacement-count limit))
             (return))
           (append-octets (subseq text position (match-start result)))
@@ -208,7 +199,7 @@ REPLACEMENT is a Rust-style template string or a function of result and text."
       (let ((position 0)
             (replacement-count 0))
         (do-matches
-          (result regex text :start start :timeout timeout)
+          (result regex text :start start :end end :timeout timeout)
           (when (and limit (>= replacement-count limit))
             (return))
           (write-string (subseq text position (match-start result)) output)
@@ -217,12 +208,12 @@ REPLACEMENT is a Rust-style template string or a function of result and text."
           (incf replacement-count))
         (write-string (subseq text position) output)))))
 
-(defun replace-n (regex text replacement count &key (start 0) timeout)
+(defun replace-n (regex text replacement count &key (start 0) end timeout)
   "Replace at most COUNT non-overlapping matches of REGEX in TEXT.
 This is the CL-REGEX-KIT equivalent of Rust Regex::replacen."
-  (replace-up-to regex text replacement count start timeout))
+  (replace-up-to regex text replacement count start end timeout))
 
-(defun replace-all (regex text replacement &key (start 0) timeout)
+(defun replace-all (regex text replacement &key (start 0) end timeout)
   "Replace every non-overlapping match of REGEX in TEXT with REPLACEMENT.
 REPLACEMENT is a Rust-style template string or a function of result and text."
-  (replace-up-to regex text replacement nil start timeout))
+  (replace-up-to regex text replacement nil start end timeout))

@@ -13,7 +13,7 @@
     # `inputs.nixpkgs.follows` is mandatory: without it each input drags in its
     # own nixpkgs, inflating flake.lock and rebuilding the same derivations.
     cl-weave = {
-      url = "github:nerima-lisp/cl-weave/v1.0.0";
+      url = "github:nerima-lisp/cl-weave/v1.0.1";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -146,6 +146,56 @@
                 touch "$out/passed"
               '';
 
+          coverage =
+            pkgs.runCommand "cl-regex-kit-coverage"
+              {
+                nativeBuildInputs = [
+                  pkgs.sbcl
+                  pkgs.coreutils
+                  pkgs.perl
+                ];
+                CL_SOURCE_REGISTRY = sourceRegistry;
+              }
+              ''
+                export HOME="$TMPDIR/home"
+                export CL_REGEX_KIT_ROOT="${self}"
+                export CL_REGEX_KIT_COVERAGE_DIRECTORY="$out"
+                mkdir -p "$HOME"
+                timeout 120 sbcl --script ${./run-coverage.lisp}
+                test -f "$out/cover-index.html"
+                perl -0777 -ne '
+                  my ($expressions_covered, $expressions_total,
+                      $branches_covered, $branches_total) = (0, 0, 0, 0);
+                  while (m{
+                    <tr\ class=\x27(?:odd|even)\x27>
+                    <td\ class=\x27text-cell\x27>.*?</td>
+                    <td>(\d+)</td><td>(\d+)</td><td>[^<]*</td>
+                    <td>(\d+|-)</td><td>(\d+|-)</td>
+                  }gsx) {
+                    $expressions_covered += $1;
+                    $expressions_total += $2;
+                    if ($3 ne "-") {
+                      $branches_covered += $3;
+                      $branches_total += $4;
+                    }
+                  }
+                  die "no source coverage rows found\n"
+                    unless $expressions_total && $branches_total;
+                  my $expression_percent =
+                    100 * $expressions_covered / $expressions_total;
+                  my $branch_percent = 100 * $branches_covered / $branches_total;
+                  printf "Coverage: expressions %d/%d (%.2f%%), branches %d/%d (%.2f%%)\n",
+                    $expressions_covered, $expressions_total, $expression_percent,
+                    $branches_covered, $branches_total, $branch_percent;
+                  die sprintf("expression coverage %.2f%% is below 90%%\n",
+                              $expression_percent)
+                    if $expression_percent < 90;
+                  die sprintf("branch coverage %.2f%% is below 85%%\n",
+                              $branch_percent)
+                    if $branch_percent < 85;
+                ' "$out/cover-index.html"
+              '';
+
           # Fails `nix flake check` when any tracked file is unformatted,
           # turning the formatter into an enforced CI gate.
           formatting = treefmtEval.${system}.config.build.check self;
@@ -171,6 +221,19 @@
               exec timeout 120 sbcl --script ${self}/run-tests.lisp
             '';
           };
+          coverage = pkgs.writeShellApplication {
+            name = "cl-regex-kit-coverage";
+            runtimeInputs = [
+              pkgs.sbcl
+              pkgs.coreutils
+            ];
+            text = ''
+              export CL_SOURCE_REGISTRY="${sourceRegistry}"
+              export CL_REGEX_KIT_ROOT="${self}"
+              export CL_REGEX_KIT_COVERAGE_DIRECTORY="$PWD/coverage"
+              exec timeout 120 sbcl --script ${./run-coverage.lisp}
+            '';
+          };
         in
         {
           default = {
@@ -182,6 +245,11 @@
             type = "app";
             program = "${test}/bin/cl-regex-kit-test";
             meta.description = "Run the cl-regex-kit test suite";
+          };
+          coverage = {
+            type = "app";
+            program = "${coverage}/bin/cl-regex-kit-coverage";
+            meta.description = "Generate SBCL coverage reports";
           };
         }
       );

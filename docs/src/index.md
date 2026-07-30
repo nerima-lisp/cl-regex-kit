@@ -60,7 +60,7 @@ case). RE2 and Rust's `regex` took a different approach: compile the pattern
 to a nondeterministic finite automaton and simulate every reachable state at
 once, character by character, so a failed path is merged away instead of
 retried. That structurally forecloses catastrophic backtracking, at the cost
-of a smaller feature set -- no backreferences, no unbounded lookaround.
+of a smaller feature set -- no backreferences, no lookaround.
 
 `cl-regex-kit` follows that second design, from scratch, in Common Lisp.
 
@@ -71,7 +71,7 @@ of a smaller feature set -- no backreferences, no unbounded lookaround.
 - **Captures without giving up the guarantee.** Each thread carries its own
   capture-slot vector (Pike's VM), so leftmost-first submatch semantics survive
   the simulation instead of requiring a return to backtracking.
-- **A deliberately smaller feature set.** Backreferences and unbounded
-  lookaround are out of scope from the start -- see
+- **A deliberately smaller feature set.** Backreferences and lookaround are
+  out of scope from the start -- see
   [Compatibility](compatibility.md) -- because retrofitting them later would
   mean reintroducing the exponential blowup the whole design avoids.

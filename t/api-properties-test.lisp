@@ -203,6 +203,45 @@
         (expect (match (format nil "\\p{~A}" property) nonmatching-text) :to-be-null)))))
 
 (it
+  "matches long major-category aliases and unassigned code points"
+  (dolist (case '(("Letter" #x0041 #x0031)
+                  ("Mark" #x0301 #x0041)
+                  ("Number" #x0031 #x0041)
+                  ("Punct" #x0021 #x0041)
+                  ("Symbol" #x002B #x0041)
+                  ("Separator" #x0020 #x0041)
+                  ("Other" #x0000 #x0041)
+                  ("Unassigned" #x0378 #x0041)))
+    (destructuring-bind (property matching-code nonmatching-code) case
+      (let ((matching-text (string (code-char matching-code)))
+            (nonmatching-text (string (code-char nonmatching-code))))
+        (expect (match (format nil "\\p{~A}" property) matching-text) :to-be-truthy)
+        (expect (match (format nil "\\P{~A}" property) nonmatching-text) :to-be-truthy)
+        (expect (match (format nil "\\p{~A}" property) nonmatching-text) :to-be-null)))))
+
+(it
+  "normalizes property aliases and distinguishes universal properties"
+  (dolist (case `(("Any" ,#x1f600 t)
+                  ("ASCII" ,#x007f t)
+                  ("ASCII" ,#x0080 nil)
+                  ("Assigned" ,#x0041 t)
+                  ("Assigned" ,#x0378 nil)
+                  ("InGreek_And_Coptic" ,#x03b1 t)
+                  ("Block=Greek_And_Coptic" ,#x0041 nil)
+                  ("Script_Extensions=Hira" ,#x30fc t)
+                  ("Age=15_1" ,#x2ebf0 t)
+                  ("ASCII_Hex_Digit" ,#x0067 nil)))
+    (destructuring-bind (property code-point expected) case
+      (let ((result (match (format nil "\\p{~A}" property)
+                           (string (code-char code-point)))))
+        (if expected
+            (expect result :to-be-truthy)
+            (expect result :to-be-null)))))
+  (dolist (property '("Age=15" "Age=V15_99" "Block=Not_A_Block"))
+    (signals regex-syntax-error
+      (compile-regex (format nil "\\p{~A}" property)))))
+
+(it
   "interprets RE2 octal escapes as byte characters"
   (let ((text (format nil "A~C" (code-char 0))))
     (expect (match-string (match "\\101\\000" text) text) :to-equal text))

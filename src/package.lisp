@@ -8,35 +8,73 @@
   (:export
    ;; Compilation
    #:compile-regex
+   #:compile-byte-regex
+   #:escape
    #:regex
+   #:byte-regex
    #:regex-p
+   #:byte-regex-p
    #:regex-source
    #:regex-group-count
+   #:regex-capture-count
+   #:regex-static-capture-count
+   #:regex-capture-names
    #:regex-group-index
    ;; Multi-pattern compilation
    #:compile-regex-set
+   #:compile-byte-regex-set
    #:regex-set
+   #:byte-regex-set
    #:regex-set-p
+   #:byte-regex-set-p
    #:regex-set-patterns
+   #:regex-set-count
+   #:regex-set-empty-p
    #:regex-set-matches
+   #:regex-set-matches-at
+   #:regex-set-matches-into
    #:regex-set-match-p
+   #:regex-set-match-at-p
    ;; Matching and iteration
    #:scan
+   #:scan-at
+   #:captures
+   #:captures-at
+   #:shortest-match
+   #:shortest-match-at
+   #:longest-match
    #:match
+   #:byte-match
    #:all-matches
    #:do-matches
+   #:do-captures
    #:is-match-p
+   #:is-match-at
+   #:full-match
    #:full-match-p
+   #:regex-capture-locations
+   #:capture-locations
+   #:capture-locations-p
+   #:capture-locations-count
+   #:capture-location-start
+   #:capture-location-end
+   #:scan-captures-into
+   #:scan-captures-into-at
    ;; Text transformation
    #:split
+   #:split-terminator
+   #:split-inclusive
+   #:split-n
    #:replace-first
    #:replace-all
+   #:replace-n
    ;; Match results
    #:match-result
    #:match-result-p
    #:match-start
    #:match-end
    #:match-string
+   #:match-captures
    #:match-group-start
    #:match-group-end
    #:match-group-string
@@ -45,4 +83,6 @@
    #:regex-syntax-error
    #:regex-syntax-error-pattern
    #:regex-syntax-error-position
-   #:regex-syntax-error-reason))
+   #:regex-syntax-error-reason
+   #:regex-timeout
+   #:regex-timeout-seconds))

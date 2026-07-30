@@ -2,28 +2,41 @@
 
 ## Current status
 
-The scaffold is in place: package, conditions, and the full `regex-node` AST
-hierarchy are real. `parse-regex`, `compile-to-nfa`, and `run-pike-vm` are
-stubs that signal an error until implemented.
+The engine is implemented end to end: parsing produces the `regex-node` AST,
+Thompson construction compiles it to an instruction program, and Pike's VM
+executes it with leftmost-first matching and captures. `all-matches` returns
+non-overlapping results while safely advancing through zero-length matches.
 
-## Planned, in dependency order
+## Implemented scope
 
 1. **`parse-regex`** -- literals, concatenation, alternation, grouping
-   (capturing and `(?:...)`), repetition (`*`, `+`, `?`, `{m,n}`, greedy and
-   lazy), character classes (including negation and the `\d`/`\w`/`\s`
-   shorthands), `.`, and anchors (`^`, `$`).
+   (capturing, named, and `(?:...)`), repetition (`*`, `+`, `?`, `{m}`,
+   `{m,n}`, `{m,}`,
+   greedy and lazy), character classes, escapes, inline flags, and line,
+   absolute, and word-boundary anchors.
 2. **`compile-to-nfa`** -- Thompson construction from the AST to the `inst`
    program, one case per `regex-node` subclass.
 3. **`run-pike-vm`** -- the thread-set simulation itself: sparse-set thread
    deduplication, capture-slot save/restore per thread, and leftmost-first
    priority at `:split`.
 4. **`all-matches`** -- repeated `scan` calls advancing past each match.
-5. Property-based tests for `parse-regex` (never signals anything but
-   `regex-syntax-error`) and round-trip tests once there is a serializer to
-   round-trip against, per the org's
-   [test standard](https://github.com/nerima-lisp/.github/blob/main/TEST_STANDARD.md#property-based-テスト).
+5. Focused parser, compiler, VM, and public API specifications, including
+   malformed patterns, capture groups, greedy/lazy quantifiers, anchors,
+   classes, and zero-length multi-match advancement.
+6. SBCL `sb-cover` instrumentation produces an HTML report for every
+   production source file. Run `nix run .#coverage` to write them to
+   `coverage/`; the Nix check enforces at least 90% expression and 85% branch
+   coverage across handwritten source files.
+7. Shrinkable property tests cover escaping, bounded repetition, and merged
+   regex-set equivalence; bounded parser fuzzing rejects only documented
+   syntax errors and exposes all other failures.
 
 ## Explicit non-goals
 
-See [Compatibility](compatibility.md): backreferences and unbounded lookaround
+See [Compatibility](compatibility.md): backreferences and lookaround
 are not planned, by design.
+
+## Future extensions
+
+- Additional regular-expression syntax where it preserves the finite-automaton
+  execution model

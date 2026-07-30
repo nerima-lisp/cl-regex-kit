@@ -15,3 +15,11 @@
              (regex-syntax-error-position condition)
              (regex-syntax-error-reason condition))))
   (:documentation "Signalled by PARSE-REGEX when PATTERN cannot be parsed."))
+
+(define-condition regex-timeout (cl-regex-kit-error)
+  ((seconds :initarg :seconds :reader regex-timeout-seconds))
+  (:report
+   (lambda (condition stream)
+     (format stream "Regular expression matching exceeded ~,3F seconds"
+             (regex-timeout-seconds condition))))
+  (:documentation "Signalled when a matching operation exceeds its time limit."))

@@ -33,16 +33,18 @@ needs [cl-weave](https://github.com/nerima-lisp/cl-weave).
 
 (defparameter *pattern* (cl-regex-kit:compile-regex "a.c"))
 (cl-regex-kit:scan *pattern* "xx abc yy")
-;; => a MATCH-RESULT spanning "abc", once the parser and matcher are implemented
+;; => a MATCH-RESULT spanning "abc"
 
 ;; Or, for a pattern used only once:
 (cl-regex-kit:match "a.c" "abc")
 ```
 
-!!! note "Current status"
-    The public API and AST shape are in place, but `parse-regex`,
-    `compile-to-nfa`, and `run-pike-vm` are stubs that signal an error until
-    implemented. See [Roadmap](roadmap.md).
+!!! note "Supported syntax"
+    The public API supports literals, alternation, named groups, greedy and lazy
+    repetition, character classes, escapes, inline flags, and line, absolute,
+    and word-boundary anchors.
+    See the [Roadmap](roadmap.md) for the exact scope and intentional
+    exclusions.
 
 ## Reading a match
 
