@@ -10,7 +10,7 @@
    ;; Custom matcher definition
    #:defmatcher
    ;; Property generators
-   #:gen-integer #:gen-string #:gen-list #:gen-member)
+   #:gen-integer #:gen-string #:gen-list #:gen-member #:gen-map #:gen-such-that)
   (:import-from #:cl-regex-kit
    #:compile-regex #:compile-byte-regex #:escape #:scan #:scan-at #:captures #:captures-at #:shortest-match #:shortest-match-at #:longest-match #:match #:byte-match #:is-match-p #:is-match-at #:all-matches #:do-matches #:do-captures
    #:full-match

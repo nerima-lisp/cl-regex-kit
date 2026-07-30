@@ -104,6 +104,16 @@
                      'cl-regex-kit::alternation-node)
               :to-be-truthy))))
 
+(it-property
+  "UTF-8 encoding round-trips for every generated Unicode scalar"
+  ((character (gen-map #'code-char
+                       (gen-such-that (lambda (code) (not (<= #xd800 code #xdfff)))
+                                      (gen-integer :min 0 :max #x10ffff))
+                       :name :unicode-scalar)))
+  (let* ((octets (coerce (cl-regex-kit::utf8-octets-for-character character) 'vector))
+         (decoded (cl-regex-kit::utf8-character-at octets 0)))
+    (expect decoded :to-be character)))
+
 (it "recognizes capture-stable empty and non-empty repetitions"
   (labels ((literal ()
            (make-instance 'cl-regex-kit::literal-node :char #\a))

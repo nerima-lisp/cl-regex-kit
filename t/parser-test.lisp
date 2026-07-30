@@ -6,89 +6,65 @@
     (expect (typep ast 'cl-regex-kit::concat-node) :to-be-truthy)
     (expect (length (cl-regex-kit::concat-node-children ast)) :to-equal 4)))
 
-(it "rejects malformed patterns with regex-syntax-error"
-  (signals regex-syntax-error (cl-regex-kit::parse-regex "(abc"))
-  (signals regex-syntax-error (cl-regex-kit::parse-regex "a{3,2}"))
-  (signals regex-syntax-error (cl-regex-kit::parse-regex "[z-a]"))
-  (signals regex-syntax-error (cl-regex-kit::parse-regex "\\"))
-  (signals regex-syntax-error (cl-regex-kit::parse-regex "\\q"))
-  (signals regex-syntax-error (cl-regex-kit::parse-regex "[\\q]"))
-  (signals regex-syntax-error
-           (cl-regex-kit::parse-regex "\\p{Definitely_Not_A_Property}"))
-    (signals regex-syntax-error
-             (cl-regex-kit::parse-regex "\\p{Script=Definitely_Not_A_Script}")))
+(it "rejects a non-string pattern with regex-syntax-error"
+  (signals regex-syntax-error (cl-regex-kit::parse-regex nil)))
+
+(it-each (("(abc") ("a{3,2}") ("[z-a]") ("\\") ("\\q") ("[\\q]")
+          ("\\p{Definitely_Not_A_Property}") ("\\p{Script=Definitely_Not_A_Script}")
+          ("\\p{}") ("\\p{") ("\\p") ("\\x") ("\\x{}") ("\\x{1")
+          ("\\x{110000}") ("\\x{D800}") ("\\uD800") ("\\u{D800}") ("\\U0000D800")
+          ("\\U{D800}") ("\\u123") ("\\U00110000") ("\\400")
+          ("\\b{") ("\\b{middle}") ("[[:]]") ("[[:unknown:]]")
+          ("[a-\\d]") ("[a") ("[a&&]") ("(?Pname)") ("(?q)a")
+          ("(?i?a)") ("(?ii)a") ("(?i-i)a") ("(?i--m)a")
+          ("a{") ("a{1,0}") ("a{1001}") ("a**"))
+    "rejects the malformed pattern ~S with regex-syntax-error"
+    (pattern)
+  (signals regex-syntax-error (cl-regex-kit::parse-regex pattern)))
 
 (it "accepts Rust Unicode Age aliases"
   (expect (cl-regex-kit::parse-regex "\\p{Age=15.1}") :to-be-truthy)
   (expect (cl-regex-kit::parse-regex "\\p{Age=V15_1}") :to-be-truthy)
   (expect (cl-regex-kit::parse-regex "\\p{Age=v151}") :to-be-truthy))
 
-(it "rejects malformed escapes, classes, groups, and repetitions consistently"
-  (signals regex-syntax-error (cl-regex-kit::parse-regex nil))
-  (dolist (pattern '("\\p{}" "\\p{" "\\p" "\\x" "\\x{}" "\\x{1"
-                     "\\x{110000}" "\\x{D800}" "\\uD800" "\\u{D800}" "\\U0000D800" "\\U{D800}" "\\u123" "\\U00110000" "\\400"
-                     "\\b{" "\\b{middle}" "[[:]]" "[[:unknown:]]"
-                     "[a-\\d]" "[a" "[a&&]" "(?Pname)" "(?q)a"
-                     "(?i?a)" "(?ii)a" "(?i-i)a" "(?i--m)a"
-                     "a{" "a{1,0}" "a{1001}" "a**"))
-    (signals regex-syntax-error (cl-regex-kit::parse-regex pattern))))
+(defun escape-form-text (designator)
+  "Translate a symbolic ESCAPE-FORM-TEST row designator to its literal text."
+  (case designator
+    (:tab (string #\Tab))
+    (:return (string #\Return))
+    (:vertical-tab (string (code-char 11)))
+    (:nul (string (code-char 0)))
+    (:start-of-heading (string (code-char 1)))
+    (:line-feed (string #\Newline))
+    (otherwise designator)))
 
-(it "supports RE2 and Rust escape forms under Unicode and ASCII modes"
-  (dolist (case '(("\\d" "5" t)
-                  ("\\D" "x" t)
-                  ("\\s" :tab t)
-                  ("\\P{ASCII}" "é" t)
-                  ("\\x{41}" "A" t)
-                  ("\\u0041" "A" t)
-                  ("\\U00000041" "A" t)
-                  ("\\0" :nul t)
-                  ("\\00" :nul t)
-                  ("\\1" :start-of-heading t)
-                  ("\\12" :line-feed t)
-                  ("\\141" "a" t)
-                  ("\\r" :return t)
-                  ("\\v" :vertical-tab t)
-                  ("\\d" "5" nil)
-                  ("\\s" :tab nil)))
-    (destructuring-bind (pattern text unicode) case
-      (expect (is-match-p (compile-regex pattern :unicode unicode)
-                          (case text
-                            (:tab (string #\Tab))
-                            (:return (string #\Return))
-                            (:vertical-tab (string (code-char 11)))
-                            (:nul (string (code-char 0)))
-                            (:start-of-heading (string (code-char 1)))
-                            (:line-feed (string #\Newline))
-                            (otherwise text)))
-              :to-be-truthy))))
+(it-each (("\\d" "5" t) ("\\D" "x" t) ("\\s" :tab t) ("\\P{ASCII}" "é" t)
+          ("\\x{41}" "A" t) ("\\u0041" "A" t) ("\\U00000041" "A" t)
+          ("\\0" :nul t) ("\\00" :nul t) ("\\1" :start-of-heading t)
+          ("\\12" :line-feed t) ("\\141" "a" t) ("\\r" :return t)
+          ("\\v" :vertical-tab t) ("\\d" "5" nil) ("\\s" :tab nil))
+    "matches ~S against ~S under RE2/Rust semantics (unicode ~A)"
+    (pattern text unicode)
+  (expect (is-match-p (compile-regex pattern :unicode unicode) (escape-form-text text))
+          :to-be-truthy))
 
-(it "accepts one- through three-digit octal escapes in character classes"
-  (dolist (case `(("[\\0]" ,(code-char 0))
-                  ("[\\12]" ,(code-char 10))
-                  ("[\\141]" #\a)))
-    (destructuring-bind (pattern character) case
-      (expect (is-match-p (compile-regex pattern) (string character))
-              :to-be-truthy))))
+(it-each (("[\\0]" #.(code-char 0)) ("[\\12]" #\Newline) ("[\\141]" #\a))
+    "accepts the ~A octal escape as ~S inside a character class"
+    (pattern character)
+  (expect (is-match-p (compile-regex pattern) (string character)) :to-be-truthy))
 
-(it "supports every RE2 ASCII POSIX character class and inner negation"
-  (dolist (case `(("alnum" #\A #\-)
-                  ("alpha" #\A #\1)
-                  ("ascii" ,(code-char 0) ,(code-char #x80))
-                  ("blank" #\Tab #\Newline)
-                  ("cntrl" ,(code-char 0) #\A)
-                  ("digit" #\1 #\A)
-                  ("graph" #\! #\Space)
-                  ("lower" #\a #\A)
-                  ("print" #\Space ,(code-char 127))
-                  ("punct" #\! #\A)
-                  ("space" #\Newline #\A)
-                  ("upper" #\A #\a)
-                  ("word" #\_ #\-)
-                  ("xdigit" #\F #\G)))
-    (destructuring-bind (name member non-member) case
-      (let ((regex (compile-regex (format nil "[[:~A:]]" name))))
-        (expect (full-match regex (string member)) :to-be-truthy)
-        (expect (full-match regex (string non-member)) :to-be-falsy))))
+(it-each (("alnum" #\A #\-) ("alpha" #\A #\1) ("ascii" #.(code-char 0) #.(code-char #x80))
+          ("blank" #\Tab #\Newline) ("cntrl" #.(code-char 0) #\A) ("digit" #\1 #\A)
+          ("graph" #\! #\Space) ("lower" #\a #\A) ("print" #\Space #.(code-char 127))
+          ("punct" #\! #\A) ("space" #\Newline #\A) ("upper" #\A #\a)
+          ("word" #\_ #\-) ("xdigit" #\F #\G))
+    "supports the RE2 ASCII POSIX class [[:~A:]], matching ~S but not ~S"
+    (name member non-member)
+  (let ((regex (compile-regex (format nil "[[:~A:]]" name))))
+    (expect (full-match regex (string member)) :to-be-truthy)
+    (expect (full-match regex (string non-member)) :to-be-falsy)))
+
+(it "negates a POSIX character class with the inner [:^name:] form"
   (let ((regex (compile-regex "[[:^digit:]]")))
     (expect (full-match regex "A") :to-be-truthy)
     (expect (full-match regex "1") :to-be-falsy)))
@@ -205,6 +181,16 @@
         :unreachable))
     (expect depth :to-equal 0)))
 
+(it-fuzz
+  "arbitrary bounded byte-mode patterns either parse or report a syntax error"
+  ((pattern (gen-string :min-length 0
+                       :max-length 80
+                       :alphabet "aAzZ09()[]{}?*+|\\\\.^$:<>,#_- \t\n")))
+  (:trials 200 :timeout-per-trial 1)
+  (handler-case
+      (cl-regex-kit::parse-regex pattern :byte-mode t :initial-flags 0)
+    (regex-syntax-error () nil)))
+
 (it "rejects Unicode-only syntax in non-Unicode byte patterns"
   (signals regex-syntax-error
     (cl-regex-kit::parse-regex "\\p{L}" :byte-mode t :initial-flags 0))
@@ -215,3 +201,21 @@
   (expect (typep (cl-regex-kit::parse-regex "\\C" :byte-mode t)
                  'cl-regex-kit::any-char-node)
           :to-be-truthy))
+
+(it "rejects non-ASCII and Unicode-property class content in non-Unicode byte patterns"
+  (dolist (pattern '("[\\p{L}]" "[\\x{e9}]"))
+    (signals regex-syntax-error
+      (cl-regex-kit::parse-regex pattern :byte-mode t :initial-flags 0)))
+  ;; A raw single-octet escape is exempt: it explicitly names one byte value,
+  ;; not a Unicode scalar the parser would otherwise have to reject.
+  (expect (cl-regex-kit::parse-regex "[\\xe9]" :byte-mode t :initial-flags 0)
+          :to-be-truthy))
+
+(it "runs an unterminated quoted literal to the end of the pattern"
+  (let ((regex (compile-regex "\\Qa.b")))
+    (expect (full-match regex "a.b") :to-be-truthy)
+    (expect (full-match regex "aXb") :to-be-falsy)))
+
+(it "rejects an unclosed named-capture body and an unnamed group's missing < after ?P"
+  (dolist (pattern '("(?P<name" "(?<name"))
+    (signals regex-syntax-error (cl-regex-kit::parse-regex pattern))))

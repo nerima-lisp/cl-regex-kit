@@ -33,6 +33,18 @@
     (signals error (cl-regex-kit::run-pike-vm program "a" :start 1 :end 0))
     (signals error (cl-regex-kit::run-pike-vm program "a" :shortest-p t :longest-p t))))
 
+(it-property
+  "scan results always fall within the searched text bounds"
+  ((text (gen-string :min-length 0 :max-length 40 :alphabet "ab"))
+   (requested-start (gen-integer :min 0 :max 40)))
+  (let* ((regex (compile-regex "a+|b+"))
+         (start (min requested-start (length text)))
+         (result (scan regex text :start start)))
+    (when result
+      (expect (<= 0 (match-start result) (match-end result) (length text))
+              :to-be-truthy)
+      (expect (>= (match-start result) start) :to-be-truthy))))
+
 (it "validates set buffers and byte word-half boundaries in the VM"
   (let* ((set (compile-regex-set '("cat" "dog")))
          (program (cl-regex-kit::regex-set-program set)))
