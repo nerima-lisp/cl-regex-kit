@@ -9,7 +9,7 @@
   :homepage "https://github.com/nerima-lisp/cl-regex-kit"
   :bug-tracker "https://github.com/nerima-lisp/cl-regex-kit/issues"
   :source-control (:git "https://github.com/nerima-lisp/cl-regex-kit.git")
-  :depends-on ()
+  :depends-on ("cl-parser-kit")
   :pathname "src"
   :serial t
   :components
@@ -19,11 +19,15 @@
    (:file "unicode-property-data")
    (:file "unicode-extra-binary-property-data")
    (:file "unicode-age-data")
+   (:file "unicode-binary-property-range-data")
    (:file "unicode-properties")
    (:file "unicode-case-folding-data")
    (:file "character-class")
    (:file "parser-syntax")
-   (:file "parser")
+   (:file "regex-tokenizer-escapes")
+   (:file "regex-tokenizer")
+   (:file "regex-grammar")
+   (:file "regex-grammar-classes")
    (:file "nfa")
    (:file "pike-vm")
    (:file "api")

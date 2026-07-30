@@ -95,22 +95,30 @@ not substrings, so it can be reused safely across different input texts."
           (error 'regex-timeout :seconds timeout)))
       (funcall thunk)))
 
+(defun call-with-validated-match (regex text start end timeout thunk)
+  "Validate REGEX/TEXT/START/END, then invoke THUNK with the validated LIMIT
+under TIMEOUT, continuation-passing style: THUNK performs the actual VM run
+and returns its MATCH-RESULT (or NIL), which this function returns unchanged.
+Shared by every SCAN-shaped entry point so each one states only how it wants
+RUN-PIKE-VM invoked, not how to get there."
+  (check-type regex regex)
+  (let ((limit (validate-text-range regex text start end)))
+    (call-with-timeout timeout (lambda () (funcall thunk limit)))))
+
 (defun scan (regex text &key (start 0) end timeout)
   "Find the leftmost-first match of REGEX in TEXT within [START, END).
 Returns a MATCH-RESULT, or NIL if there is no match. TIMEOUT is a positive
 number of seconds, or NIL to impose no deadline."
-  (check-type regex regex)
-  (let ((limit (validate-text-range regex text start end)))
-    (let ((result (call-with-timeout
-                 timeout
-                 (lambda ()
+  (let ((result (call-with-validated-match
+                 regex text start end timeout
+                 (lambda (limit)
                    (run-pike-vm (regex-program regex) text
                                 :start start
                                 :end limit
                                 :never-newline-p (regex-never-newline-p regex))))))
-      (when result
-        (setf (match-result-group-names result) (regex-group-names regex)))
-      result)))
+    (when result
+      (setf (match-result-group-names result) (regex-group-names regex)))
+    result))
 
 (defun scan-at (regex text start &key end timeout)
   "Find REGEX's leftmost-first match in TEXT at or after START.
@@ -165,17 +173,15 @@ remains the exclusive upper bound of the searched range."
 The selected match begins at the earliest position at or after START and has
 the earliest possible end position there. Return NIL when REGEX does not
 match. TIMEOUT is a positive number of seconds, or NIL to impose no deadline."
-  (check-type regex regex)
-  (let ((limit (validate-text-range regex text start end)))
-    (let ((result (call-with-timeout
-                 timeout
-                 (lambda ()
+  (let ((result (call-with-validated-match
+                 regex text start end timeout
+                 (lambda (limit)
                    (run-pike-vm (regex-program regex) text
                                 :start start
                                 :end limit
                                 :shortest-p t
                                 :never-newline-p (regex-never-newline-p regex))))))
-      (and result (match-result-end result)))))
+    (and result (match-result-end result))))
 
 (defun shortest-match-at (regex text start &key end timeout)
   "Return the end index of REGEX's shortest leftmost match at or after START.
@@ -189,19 +195,17 @@ remains the exclusive upper bound of the searched range."
 
 This provides RE2's longest-match selection without changing SCAN's Rust-style
 leftmost-first semantics. Return a MATCH-RESULT, or NIL if no match exists."
-  (check-type regex regex)
-  (let ((limit (validate-text-range regex text start end)))
-    (let ((result (call-with-timeout
-                 timeout
-                 (lambda ()
+  (let ((result (call-with-validated-match
+                 regex text start end timeout
+                 (lambda (limit)
                    (run-pike-vm (regex-program regex) text
                                 :start start
                                 :end limit
                                 :longest-p t
                                 :never-newline-p (regex-never-newline-p regex))))))
-      (when result
-        (setf (match-result-group-names result) (regex-group-names regex)))
-      result)))
+    (when result
+      (setf (match-result-group-names result) (regex-group-names regex)))
+    result))
 
 (defun is-match-p (regex text &key (start 0) end timeout)
   "Return true when REGEX matches TEXT within [START, END)."

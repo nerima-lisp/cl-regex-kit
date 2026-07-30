@@ -6,70 +6,83 @@
 ;;;; directly.
 (in-package #:cl-regex-kit)
 
-(defclass regex-node () ()
-  (:documentation "Base class for every regex AST node."))
+(defmacro define-regex-node (name superclasses slots &optional documentation)
+  "Define a REGEX-NODE subclass NAME from a compact SLOTS spec.
 
-(defclass literal-node (regex-node)
-  ((char :initarg :char :reader literal-node-char)
-   (raw-octet-p :initarg :raw-octet-p :initform nil
-                :reader literal-node-raw-octet-p
+Each entry in SLOTS is (SLOT-NAME &key initform documentation): SLOT-NAME
+gets a keyword initarg of the same name and a reader NAME-SLOT-NAME, exactly
+as a hand-written DEFCLASS would. This keeps every node's shape declarative
+data while the class-generation logic lives in one place."
+  `(defclass ,name (,@superclasses)
+     (,@(mapcar
+         (lambda (slot)
+           (destructuring-bind (slot-name &key (initform nil initform-p) documentation)
+               slot
+             `(,slot-name
+               :initarg ,(intern (symbol-name slot-name) :keyword)
+               :reader ,(intern (format nil "~A-~A" name slot-name))
+               ,@(when initform-p (list :initform initform))
+               ,@(when documentation (list :documentation documentation)))))
+         slots))
+     ,@(when documentation `((:documentation ,documentation)))))
+
+(define-regex-node regex-node () ()
+  "Base class for every regex AST node.")
+
+(define-regex-node literal-node (regex-node)
+  ((char)
+   (raw-octet-p :initform nil
                 :documentation "True when CHAR came from a raw byte escape.")
-   (case-insensitive-p :initarg :case-insensitive-p :initform nil
-                       :reader literal-node-case-insensitive-p)
-   (unicode-p :initarg :unicode-p :initform t :reader literal-node-unicode-p))
-  (:documentation "A single literal character."))
+   (case-insensitive-p :initform nil)
+   (unicode-p :initform t))
+  "A single literal character.")
 
-(defclass concat-node (regex-node)
-  ((children :initarg :children :reader concat-node-children))
-  (:documentation "CHILDREN matched one after another."))
+(define-regex-node concat-node (regex-node)
+  ((children))
+  "CHILDREN matched one after another.")
 
-(defclass alternation-node (regex-node)
-  ((branches :initarg :branches :reader alternation-node-branches))
-  (:documentation "The first BRANCH that matches wins: `a|b|c`."))
+(define-regex-node alternation-node (regex-node)
+  ((branches))
+  "The first BRANCH that matches wins: `a|b|c`.")
 
-(defclass repetition-node (regex-node)
-  ((child :initarg :child :reader repetition-node-child)
-   (min :initarg :min :reader repetition-node-min)
-   (max :initarg :max :initform nil :reader repetition-node-max
+(define-regex-node repetition-node (regex-node)
+  ((child)
+   (min)
+   (max :initform nil
         :documentation "NIL means unbounded, as in `*` and `+`.")
-   (greedy-p :initarg :greedy-p :initform t :reader repetition-node-greedy-p))
-  (:documentation "CHILD repeated between MIN and MAX times: `*`, `+`, `?`, `{m,n}`."))
+   (greedy-p :initform t))
+  "CHILD repeated between MIN and MAX times: `*`, `+`, `?`, `{m,n}`.")
 
-(defclass group-node (regex-node)
-  ((child :initarg :child :reader group-node-child)
-   (capture-index :initarg :capture-index :initform nil :reader group-node-capture-index
+(define-regex-node group-node (regex-node)
+  ((child)
+   (capture-index :initform nil
                   :documentation "NIL for a non-capturing group `(?:...)`.")
-   (name :initarg :name :initform nil :reader group-node-name))
-  (:documentation "A parenthesized group, capturing or not."))
+   (name :initform nil))
+  "A parenthesized group, capturing or not.")
 
-(defclass char-class-node (regex-node)
-  ((ranges :initarg :ranges :reader char-class-node-ranges
-           :documentation "A list of (START . END) char-code ranges, inclusive.")
-   (matcher :initarg :matcher :initform nil :reader char-class-node-matcher
+(define-regex-node char-class-node (regex-node)
+  ((ranges :documentation "A list of (START . END) char-code ranges, inclusive.")
+   (matcher :initform nil
             :documentation "A Boolean character-set matcher expression, when required.")
-   (negated-p :initarg :negated-p :initform nil :reader char-class-node-negated-p)
-   (case-insensitive-p :initarg :case-insensitive-p :initform nil
-                       :reader char-class-node-case-insensitive-p)
-   (unicode-p :initarg :unicode-p :initform t :reader char-class-node-unicode-p))
-  (:documentation "A character class: `[abc]`, `[a-z]`, `[^0-9]`, or a property/set expression."))
+   (negated-p :initform nil)
+   (case-insensitive-p :initform nil)
+   (unicode-p :initform t))
+  "A character class: `[abc]`, `[a-z]`, `[^0-9]`, or a property/set expression.")
 
-(defclass any-char-node (regex-node)
-  ((dotall-p :initarg :dotall-p :initform nil :reader any-char-node-dotall-p)
-   (crlf-p :initarg :crlf-p :initform nil :reader any-char-node-crlf-p)
-   (line-terminator :initarg :line-terminator :initform #\Newline
-                    :reader any-char-node-line-terminator)
-   (unicode-p :initarg :unicode-p :initform t :reader any-char-node-unicode-p))
-  (:documentation "`.` -- matches any character except newline."))
+(define-regex-node any-char-node (regex-node)
+  ((dotall-p :initform nil)
+   (crlf-p :initform nil)
+   (line-terminator :initform #\Newline)
+   (unicode-p :initform t))
+  "`.` -- matches any character except newline.")
 
-(defclass anchor-node (regex-node)
-  ((kind :initarg :kind :reader anchor-node-kind
-          :documentation "An anchor or boundary keyword.")
-   (multiline-p :initarg :multiline-p :initform nil :reader anchor-node-multiline-p)
-   (crlf-p :initarg :crlf-p :initform nil :reader anchor-node-crlf-p)
-   (line-terminator :initarg :line-terminator :initform #\Newline
-                    :reader anchor-node-line-terminator)
-   (unicode-p :initarg :unicode-p :initform nil :reader anchor-node-unicode-p))
-  (:documentation "A zero-width position assertion."))
+(define-regex-node anchor-node (regex-node)
+  ((kind :documentation "An anchor or boundary keyword.")
+   (multiline-p :initform nil)
+   (crlf-p :initform nil)
+   (line-terminator :initform #\Newline)
+   (unicode-p :initform nil))
+  "A zero-width position assertion.")
 
 (defun utf8-octets-for-character (character)
   "Return the UTF-8 encoding of CHARACTER as a list of octets."

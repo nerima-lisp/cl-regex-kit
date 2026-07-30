@@ -5,6 +5,12 @@
 ;;;; and nothing else.
 (defpackage #:cl-regex-kit
   (:use #:cl)
+  (:import-from #:cl-parser-kit
+   #:make-token
+   #:token-type
+   #:token-value
+   #:token-start
+   #:token-end)
   (:export
    ;; Compilation
    #:compile-regex

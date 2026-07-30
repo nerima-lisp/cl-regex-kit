@@ -1,5 +1,24 @@
 (in-package #:cl-regex-kit)
 
+;; DEFVAR'd here, ahead of regex-tokenizer.lisp/regex-grammar.lisp/
+;; regex-grammar-classes.lisp, purely for load order: the tokenizer reads
+;; *REGEX-BYTE-MODE-P*/*REGEX-OCTAL-P* (fixed for the whole parse) and every
+;; grammar function reads and mutates the rest, but PARSE-REGEX (in
+;; regex-grammar.lisp) is what actually binds them, once, per call.
+(defvar *regex-pattern*)
+(defvar *regex-tokens*)
+(defvar *regex-token-position*)
+(defvar *regex-length*)
+(defvar *regex-group-count*)
+(defvar *regex-group-names*)
+(defvar *regex-flags*)
+(defvar *regex-nesting-depth*)
+(defvar *regex-byte-mode-p*)
+(defvar *regex-never-capture-p*)
+(defvar *regex-octal-p*)
+(defvar *regex-nest-limit*)
+(defvar *regex-line-terminator*)
+
 (defconstant +flag-case-insensitive+ #b0001)
 
 (defconstant +flag-multiline+ #b0010)

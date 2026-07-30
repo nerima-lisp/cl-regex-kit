@@ -3,28 +3,35 @@
 ;;; Matcher composition and boundary predicates. Static Unicode case-folding
 ;;; data lives in unicode-case-folding-data.lisp; property data lives in
 ;;; unicode-properties.lisp.
-(defun matcher-matches-p (matcher character)
-  (case (first matcher)
-    (:ranges (range-matches-p (second matcher) character))
-    (:property (unicode-property-p (second matcher) character))
-    (:union
-      (some
-        (lambda (part)
-          (matcher-matches-p part character))
-        (rest matcher)))
-    (:intersection
-      (and
-        (matcher-matches-p (second matcher) character)
-        (matcher-matches-p (third matcher) character)))
-    (:difference
-      (and
-        (matcher-matches-p (second matcher) character)
-        (not (matcher-matches-p (third matcher) character))))
-    (:symmetric-difference
-      (not (eq (not (null (matcher-matches-p (second matcher) character)))
-               (not (null (matcher-matches-p (third matcher) character))))))
-    (:negate (not (matcher-matches-p (second matcher) character)))
-    (otherwise (error "Unknown character-class matcher: ~S" matcher))))
+(defmacro define-set-matcher (name (matcher-var element-var) &key ranges property otherwise)
+  "Define NAME as a character-class matcher evaluator over ELEMENT-VAR.
+
+RANGES and PROPERTY are forms evaluated for the corresponding matcher leaves;
+OTHERWISE is evaluated when MATCHER-VAR's operator is unrecognized. The
+:union/:intersection/:difference/:symmetric-difference/:negate combinators
+are boolean-algebra logic shared by every matcher domain, so they are
+generated once here instead of once per domain."
+  `(defun ,name (,matcher-var ,element-var)
+     (case (first ,matcher-var)
+       (:ranges ,ranges)
+       (:property ,property)
+       (:union
+         (some (lambda (part) (,name part ,element-var)) (rest ,matcher-var)))
+       (:intersection
+         (every (lambda (part) (,name part ,element-var)) (rest ,matcher-var)))
+       (:difference
+         (and (,name (second ,matcher-var) ,element-var)
+              (not (,name (third ,matcher-var) ,element-var))))
+       (:symmetric-difference
+         (not (eq (not (null (,name (second ,matcher-var) ,element-var)))
+                  (not (null (,name (third ,matcher-var) ,element-var))))))
+       (:negate (not (,name (second ,matcher-var) ,element-var)))
+       (otherwise ,otherwise))))
+
+(define-set-matcher matcher-matches-p (matcher character)
+  :ranges (range-matches-p (second matcher) character)
+  :property (unicode-property-p (second matcher) character)
+  :otherwise (error "Unknown character-class matcher: ~S" matcher))
 
 
 (defun unicode-simple-case-fold-candidates (character)
@@ -91,31 +98,14 @@
         (car tail)
         tail)))
 
-(defun byte-matcher-matches-p (matcher octet)
-  (case (first matcher)
-    (:ranges
-     (some (lambda (range)
-             (<= (octet-range-bound (car range))
-                 octet
-                 (octet-range-bound (range-upper-bound range))))
-           (second matcher)))
-    (:union
-     (some (lambda (operand)
-             (byte-matcher-matches-p operand octet))
-           (rest matcher)))
-    (:intersection
-     (every (lambda (operand)
-              (byte-matcher-matches-p operand octet))
-            (rest matcher)))
-    (:difference
-     (and (byte-matcher-matches-p (second matcher) octet)
-          (not (byte-matcher-matches-p (third matcher) octet))))
-    (:symmetric-difference
-     (not (eq (not (null (byte-matcher-matches-p (second matcher) octet)))
-              (not (null (byte-matcher-matches-p (third matcher) octet))))))
-    (:negate
-     (not (byte-matcher-matches-p (second matcher) octet)))
-    (otherwise nil)))
+(define-set-matcher byte-matcher-matches-p (matcher octet)
+  :ranges (some (lambda (range)
+                  (<= (octet-range-bound (car range))
+                      octet
+                      (octet-range-bound (range-upper-bound range))))
+                (second matcher))
+  :property nil
+  :otherwise nil)
 
 (defun class-matches-octet-p (node octet)
   "Return true when byte-mode class NODE accepts OCTET."
@@ -146,23 +136,47 @@
         (not matches-p)
         matches-p)))
 
+(defmacro define-boundary-predicates (prefix lambda-list &body compute-neighbors)
+  "Define PREFIX-BOUNDARY-P/-START-P/-END-P/-START-HALF-P/-END-HALF-P over
+LAMBDA-LIST. COMPUTE-NEIGHBORS is evaluated once per call, in each generated
+function, and must return (values LEFT-WORD-P RIGHT-WORD-P GUARD-P):
+GUARD-P gates every predicate (true unless the domain has a precondition
+narrower than \"in bounds\", as byte-mode Unicode boundaries do), and
+LEFT-WORD-P/RIGHT-WORD-P are whether a word character precedes/follows the
+position. The five predicates are the same boundary/start/end/half algebra
+in every domain this file supports (ASCII bytes, Unicode-aware bytes,
+strings) -- only how a domain decides \"is there a word character here\"
+differs, which is exactly what COMPUTE-NEIGHBORS captures."
+  (flet ((name (suffix) (intern (format nil "~A-~A" prefix suffix))))
+    `(progn
+       (defun ,(name "BOUNDARY-P") ,lambda-list
+         (multiple-value-bind (left right guard-p) (progn ,@compute-neighbors)
+           (and guard-p (not (eq left right)))))
+       (defun ,(name "START-P") ,lambda-list
+         (multiple-value-bind (left right guard-p) (progn ,@compute-neighbors)
+           (and guard-p (not left) right)))
+       (defun ,(name "END-P") ,lambda-list
+         (multiple-value-bind (left right guard-p) (progn ,@compute-neighbors)
+           (and guard-p left (not right))))
+       (defun ,(name "START-HALF-P") ,lambda-list
+         (multiple-value-bind (left right guard-p) (progn ,@compute-neighbors)
+           (declare (ignore right))
+           (and guard-p (not left))))
+       (defun ,(name "END-HALF-P") ,lambda-list
+         (multiple-value-bind (left right guard-p) (progn ,@compute-neighbors)
+           (declare (ignore left))
+           (and guard-p (not right)))))))
+
 (defun byte-word-character-p (octet)
   "Return true when OCTET is an ASCII word character."
   (and octet
        (or (<= #x61 octet #x7a) (<= #x41 octet #x5a)
            (<= #x30 octet #x39) (= octet #x5f))))
 
-(defun byte-word-boundary-p (text position)
-  (not (eq (byte-word-character-p (and (> position 0) (aref text (1- position))))
-           (byte-word-character-p (and (< position (length text)) (aref text position))))))
-
-(defun byte-word-start-p (text position)
-  (and (not (byte-word-character-p (and (> position 0) (aref text (1- position)))))
-       (byte-word-character-p (and (< position (length text)) (aref text position)))))
-
-(defun byte-word-end-p (text position)
-  (and (byte-word-character-p (and (> position 0) (aref text (1- position))))
-       (not (byte-word-character-p (and (< position (length text)) (aref text position))))))
+(define-boundary-predicates byte-word (text position)
+  (values (byte-word-character-p (and (> position 0) (aref text (1- position))))
+          (byte-word-character-p (and (< position (length text)) (aref text position)))
+          t))
 
 (defun utf8-continuation-octet-p (octet)
   (and octet (<= #x80 octet #xbf)))
@@ -239,33 +253,9 @@ Returns CHARACTER, the exclusive end index, and true; otherwise three NILs."
               (or (= position (length text))
                   (not (utf8-continuation-octet-p (aref text position))))))))
 
-(defun byte-unicode-word-boundary-p (text position)
-  (multiple-value-bind (left right boundary-p)
-      (byte-unicode-boundary-characters text position)
-    (and boundary-p
-         (not (eq (word-character-p left t) (word-character-p right t))))))
-
-(defun byte-unicode-word-start-p (text position)
-  (multiple-value-bind (left right boundary-p)
-      (byte-unicode-boundary-characters text position)
-    (and boundary-p (not (word-character-p left t)) (word-character-p right t))))
-
-(defun byte-unicode-word-end-p (text position)
-  (multiple-value-bind (left right boundary-p)
-      (byte-unicode-boundary-characters text position)
-    (and boundary-p (word-character-p left t) (not (word-character-p right t)))))
-
-(defun byte-unicode-word-start-half-p (text position)
-  (multiple-value-bind (left right boundary-p)
-      (byte-unicode-boundary-characters text position)
-    (declare (ignore right))
-    (and boundary-p (not (word-character-p left t)))))
-
-(defun byte-unicode-word-end-half-p (text position)
-  (multiple-value-bind (left right boundary-p)
-      (byte-unicode-boundary-characters text position)
-    (declare (ignore left))
-    (and boundary-p (not (word-character-p right t)))))
+(define-boundary-predicates byte-unicode-word (text position)
+  (multiple-value-bind (left right boundary-p) (byte-unicode-boundary-characters text position)
+    (values (word-character-p left t) (word-character-p right t) boundary-p)))
 
 (defun byte-line-start-p (text position crlf-p line-terminator)
   (let ((terminator (char-code line-terminator)))
@@ -297,39 +287,10 @@ Returns CHARACTER, the exclusive end index, and true; otherwise three NILs."
         (and (char<= #\0 character #\9))
         (char= character #\_)))))
 
-(defun word-boundary-p (text position unicode-p)
-  (not
-    (eq
-      (word-character-p (and (> position 0) (char text (1- position))) unicode-p)
-      (word-character-p
-        (and (< position (length text)) (char text position))
-        unicode-p))))
-
-(defun word-start-p (text position unicode-p)
-  (and
-    (not
-      (word-character-p (and (> position 0) (char text (1- position))) unicode-p))
-    (word-character-p
-      (and (< position (length text)) (char text position))
-      unicode-p)))
-
-(defun word-end-p (text position unicode-p)
-  (and
-    (word-character-p (and (> position 0) (char text (1- position))) unicode-p)
-    (not
-      (word-character-p
-        (and (< position (length text)) (char text position))
-        unicode-p))))
-
-(defun word-start-half-p (text position unicode-p)
-  (not
-    (word-character-p (and (> position 0) (char text (1- position))) unicode-p)))
-
-(defun word-end-half-p (text position unicode-p)
-  (not
-    (word-character-p
-      (and (< position (length text)) (char text position))
-      unicode-p)))
+(define-boundary-predicates word (text position unicode-p)
+  (values (word-character-p (and (> position 0) (char text (1- position))) unicode-p)
+          (word-character-p (and (< position (length text)) (char text position)) unicode-p)
+          t))
 
 (defun line-start-p (text position crlf-p line-terminator)
   (if crlf-p (or

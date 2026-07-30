@@ -87,35 +87,27 @@ UTF-8 scalars by default; use (?-u:...) or \\C for raw octet matching."
   "Return true when REGEX-SET contains no source patterns."
   (zerop (regex-set-count regex-set)))
 
-(defmacro regex-set (&rest arguments)
-  "Compile literal patterns and literal builder options once when the file loads."
+(defun collect-literal-set-patterns (arguments)
+  "Split literal macro ARGUMENTS into pattern strings and trailing options.
+
+Returns the leading run of string-literal patterns and the remaining keyword
+options as two values."
   (let ((patterns '()))
     (loop while (and arguments (stringp (first arguments))) do
       (push (pop arguments) patterns))
-    (setf patterns (nreverse patterns))
-    (unless (evenp (length arguments))
-      (error "REGEX-SET options must be a keyword argument list, got: ~S" arguments))
-    (loop for (key value) on arguments by #'cddr do
-      (unless (keywordp key)
-        (error "REGEX-SET options must use keyword names, got: ~S" key))
-      (unless (constantp value)
-        (error "REGEX-SET options must be compile-time constants, got: ~S" value)))
-    `(load-time-value (compile-regex-set ',patterns ,@arguments) t)))
+    (values (nreverse patterns) arguments)))
+
+(defmacro regex-set (&rest arguments)
+  "Compile literal patterns and literal builder options once when the file loads."
+  (multiple-value-bind (patterns options) (collect-literal-set-patterns arguments)
+    (validate-literal-compiler-options "REGEX-SET" options)
+    `(load-time-value (compile-regex-set ',patterns ,@options) t)))
 
 (defmacro byte-regex-set (&rest arguments)
   "Compile literal byte patterns and literal options once when the file loads."
-  (let ((patterns '()))
-    (loop while (and arguments (stringp (first arguments))) do
-      (push (pop arguments) patterns))
-    (setf patterns (nreverse patterns))
-    (unless (evenp (length arguments))
-      (error "BYTE-REGEX-SET options must be a keyword argument list, got: ~S" arguments))
-    (loop for (key value) on arguments by #'cddr do
-      (unless (keywordp key)
-        (error "BYTE-REGEX-SET options must use keyword names, got: ~S" key))
-      (unless (constantp value)
-        (error "BYTE-REGEX-SET options must be compile-time constants, got: ~S" value)))
-    `(load-time-value (compile-byte-regex-set ',patterns ,@arguments) t)))
+  (multiple-value-bind (patterns options) (collect-literal-set-patterns arguments)
+    (validate-literal-compiler-options "BYTE-REGEX-SET" options)
+    `(load-time-value (compile-byte-regex-set ',patterns ,@options) t)))
 
 (defun validate-regex-set-text-range (regex-set text start end)
   "Validate TEXT's half-open range against REGEX-SET's input representation."
@@ -124,6 +116,16 @@ UTF-8 scalars by default; use (?-u:...) or \\C for raw octet matching."
         (check-type text octet-vector)
         (validate-input-range text start end))
       (validate-string-range text start end)))
+
+(defun call-with-validated-regex-set-match (regex-set text start end timeout thunk)
+  "Validate REGEX-SET/TEXT/START/END, then invoke THUNK with the validated
+LIMIT under TIMEOUT, continuation-passing style: THUNK performs the actual
+VM run and returns its result, which this function returns unchanged. Shared
+by every REGEX-SET matching entry point the same way CALL-WITH-VALIDATED-MATCH
+is shared by the single-pattern ones in api-match.lisp."
+  (check-type regex-set regex-set)
+  (let ((limit (validate-regex-set-text-range regex-set text start end)))
+    (call-with-timeout timeout (lambda () (funcall thunk limit)))))
 
 (defun regex-set-matches-into (regex-set matches text &key (start 0) end timeout)
   "Record REGEX-SET matches in MATCHES and return MATCHES.
@@ -136,17 +138,16 @@ index is marked with a one."
                (= (length matches) (regex-set-count regex-set)))
     (error 'type-error :datum matches
                        :expected-type `(bit-vector ,(regex-set-count regex-set))))
-  (let ((limit (validate-regex-set-text-range regex-set text start end)))
-    (call-with-timeout
-   timeout
-   (lambda ()
+  (call-with-validated-regex-set-match
+   regex-set text start end timeout
+   (lambda (limit)
      (run-pike-vm-set (regex-set-program regex-set)
                       (length (regex-set-source-patterns regex-set))
                       text
                       :start start
                       :end limit
                       :matches matches
-                      :never-newline-p (regex-set-never-newline-p regex-set))))))
+                      :never-newline-p (regex-set-never-newline-p regex-set)))))
 
 (defun regex-set-matches (regex-set text &key (start 0) end timeout)
   "Return indexes of patterns in REGEX-SET that match TEXT at or after START.
@@ -171,18 +172,16 @@ the exclusive upper bound of the searched range."
 
 (defun regex-set-match-p (regex-set text &key (start 0) end timeout)
   "Return true when any pattern in REGEX-SET matches within [START, END)."
-  (check-type regex-set regex-set)
-  (let ((limit (validate-regex-set-text-range regex-set text start end)))
-    (call-with-timeout
-     timeout
-     (lambda ()
-       (run-pike-vm-set (regex-set-program regex-set)
-                        (length (regex-set-source-patterns regex-set))
-                        text
-                        :start start
-                        :end limit
-                        :stop-at-first-match-p t
-                        :never-newline-p (regex-set-never-newline-p regex-set))))))
+  (call-with-validated-regex-set-match
+   regex-set text start end timeout
+   (lambda (limit)
+     (run-pike-vm-set (regex-set-program regex-set)
+                      (length (regex-set-source-patterns regex-set))
+                      text
+                      :start start
+                      :end limit
+                      :stop-at-first-match-p t
+                      :never-newline-p (regex-set-never-newline-p regex-set)))))
 
 (defun regex-set-match-at-p (regex-set text start &key end timeout)
   "Return true when any pattern in REGEX-SET matches TEXT at or after START.

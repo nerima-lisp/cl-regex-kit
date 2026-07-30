@@ -92,11 +92,8 @@
         (:boundary (byte-word-boundary-p text position))
         (:start (byte-word-start-p text position))
         (:end (byte-word-end-p text position))
-        (:start-half
-          (not (byte-word-character-p (and (> position 0) (aref text (1- position))))))
-        (:end-half
-          (not
-            (byte-word-character-p (and (< position (length text)) (aref text position)))))))
+        (:start-half (byte-word-start-half-p text position))
+        (:end-half (byte-word-end-half-p text position))))
     (ecase kind
       (:boundary (word-boundary-p text position unicode-p))
       (:start (word-start-p text position unicode-p))
@@ -150,6 +147,44 @@
       (vm-word-position-p :end-half text position byte-mode-p
                           (logbitp 1 (or (inst-b instruction) 0))))))
 
+(defun pike-vm-closure (program text position length byte-mode-p seeds &key on-save)
+  "Compute the epsilon-closure of SEEDS (a list of VM-THREADs) at POSITION:
+expand :SPLIT/:JMP/:SAVE and every zero-width assertion, returning the
+consuming-or-:MATCH/:SET-MATCH threads reached, each still paired with the
+SLOTS its path accumulated.
+
+ON-SAVE, when supplied, is called as (FUNCALL ON-SAVE INSTRUCTION SLOTS) to
+compute a :SAVE instruction's continuation slots -- RUN-PIKE-VM's capturing
+walk records POSITION into the target slot. Omitting it, as RUN-PIKE-VM-SET
+does, threads SLOTS through unchanged, since set matching tracks no
+captures; every seed there carries SLOTS NIL and it is never read."
+  (let ((seen (make-array (length program) :initial-element nil))
+        (head (list nil))
+        (tail nil))
+    (setf tail head)
+    (labels ((enqueue (thread)
+               (setf (cdr tail) (list thread)
+                     tail (cdr tail)))
+             (visit (pc slots)
+               (unless (aref seen pc)
+                 (setf (aref seen pc) t)
+                 (let ((instruction (aref program pc)))
+                   (case (inst-op instruction)
+                     (:split
+                      (visit (inst-a instruction) (copy-seq slots))
+                      (visit (inst-b instruction) (copy-seq slots)))
+                     (:jmp (visit (inst-a instruction) slots))
+                     (:save
+                      (visit (inst-b instruction) (if on-save (funcall on-save instruction slots) slots)))
+                     ((:bol :eol :bos :eos :boundary :non-boundary
+                       :word-start :word-end :word-start-half :word-end-half)
+                      (when (zero-width-instruction-matches-p instruction text position length byte-mode-p)
+                        (visit (inst-a instruction) slots)))
+                     (otherwise (enqueue (make-vm-thread :pc pc :slots slots))))))))
+      (dolist (seed seeds)
+        (visit (vm-thread-pc seed) (vm-thread-slots seed)))
+      (cdr head))))
+
 (defun run-pike-vm (program text &key (start 0) end shortest-p longest-p never-newline-p)
   "Run PROGRAM against TEXT and return its leftmost-first match, if any.
 
@@ -166,36 +201,13 @@ position, retaining the usual branch priority to resolve equal-length paths."
          (byte-mode-p (not (stringp text))))
     (unless (and (integerp start) (integerp limit) (<= 0 start limit length))
       (error "START and END must define a range within TEXT"))
-    (labels ((closure (seeds position)
-               (let ((seen (make-array (length program) :initial-element nil))
-                (head (list nil))
-                (tail nil))
-            (setf tail head)
-            (labels ((enqueue (thread)
-                       (setf (cdr tail) (list thread)
-                        tail (cdr tail)))
-                     (visit (pc slots)
-                       (unless (aref seen pc)
-                    (setf (aref seen pc) t)
-                    (let ((instruction (aref program pc)))
-                      (case (inst-op instruction)
-                        (:split
-                          (visit (inst-a instruction) (copy-seq slots))
-                          (visit (inst-b instruction) (copy-seq slots)))
-                        (:jmp (visit (inst-a instruction) slots))
-                        (:save
-                          (let ((next (copy-seq slots)))
-                            (setf (aref next (inst-a instruction)) position)
-                            (visit (inst-b instruction) next)))
-                        ((:bol :eol :bos :eos :boundary :non-boundary
-                          :word-start :word-end :word-start-half :word-end-half)
-                          (when (zero-width-instruction-matches-p
-                                 instruction text position length byte-mode-p)
-                            (visit (inst-a instruction) slots)))
-                        (otherwise (enqueue (make-vm-thread :pc pc :slots slots))))))))
-              (dolist (seed seeds)
-                (visit (vm-thread-pc seed) (vm-thread-slots seed)))
-              (cdr head)))))
+    (flet ((closure (seeds position)
+             (pike-vm-closure
+              program text position length byte-mode-p seeds
+              :on-save (lambda (instruction slots)
+                         (let ((next (copy-seq slots)))
+                           (setf (aref next (inst-a instruction)) position)
+                           next)))))
       (let ((pending (make-array (1+ limit) :initial-element nil))
             (best-result nil))
         (loop for position from start to limit
@@ -266,46 +278,25 @@ position, retaining the usual branch priority to resolve equal-length paths."
       (error "START and END must define a range within TEXT"))
     (when (and matches-supplied-p (not stop-at-first-match-p))
       (fill match-bits 0))
-    (labels ((closure (seeds position)
-               (let ((seen (make-array (length program) :initial-element nil))
-                (head (list nil))
-                (tail nil))
-            (setf tail head)
-            (labels ((enqueue (pc)
-                       (setf (cdr tail) (list pc)
-                        tail (cdr tail)))
-                     (visit (pc)
-                       (unless (aref seen pc)
-                    (setf (aref seen pc) t)
-                    (let ((instruction (aref program pc)))
-                      (case (inst-op instruction)
-                        (:split
-                          (visit (inst-a instruction))
-                          (visit (inst-b instruction)))
-                        (:jmp (visit (inst-a instruction)))
-                        (:save (visit (inst-b instruction)))
-                        ((:bol :eol :bos :eos :boundary :non-boundary
-                          :word-start :word-end :word-start-half :word-end-half)
-                          (when (zero-width-instruction-matches-p
-                                 instruction text position length byte-mode-p)
-                            (visit (inst-a instruction))))
-                        (otherwise (enqueue pc)))))))
-              (dolist (pc seeds)
-                (visit pc)))
-            (cdr head))))
+    (flet ((closure (seeds position)
+             (pike-vm-closure program text position length byte-mode-p seeds)))
       (when (plusp pattern-count)
         (let ((pending (make-array (1+ limit) :initial-element nil)))
           (loop for position from start to limit
-                do (let ((current (closure (cons 0 (nreverse (aref pending position))) position)))
-              (dolist (pc current)
-                (let ((instruction (aref program pc)))
+                do (let ((current
+                           (closure
+                            (cons (make-vm-thread :pc 0 :slots nil) (nreverse (aref pending position)))
+                            position)))
+              (dolist (thread current)
+                (let* ((pc (vm-thread-pc thread)) (instruction (aref program pc)))
                   (case (inst-op instruction)
                     (:set-match (if stop-at-first-match-p (return-from run-pike-vm-set t) (setf (aref match-bits (inst-a instruction)) 1)))
                     ((:char :class :any)
                       (multiple-value-bind (next-position matched-p)
                           (instruction-match-end instruction text position limit byte-mode-p never-newline-p)
                         (when matched-p
-                          (push (inst-b instruction) (aref pending next-position))))))))))))
+                          (push (make-vm-thread :pc (inst-b instruction) :slots nil)
+                                (aref pending next-position))))))))))))
       (cond (stop-at-first-match-p nil)
             (matches-supplied-p match-bits)
             (t (loop for index below pattern-count

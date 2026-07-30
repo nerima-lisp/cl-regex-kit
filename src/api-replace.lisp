@@ -30,91 +30,73 @@
   (if (every #'digit-char-p token) (parse-integer token)
     token))
 
+(defun expand-replacement-template-generic
+    (template dollar open-brace close-brace name-char-p emit-literal emit-capture output)
+  "Shared Rust-style `$name`/`${name}` replacement-template scanner for both
+the character (EXPAND-REPLACEMENT-TEMPLATE) and octet
+(EXPAND-BYTE-REPLACEMENT-TEMPLATE) domains: DOLLAR/OPEN-BRACE/CLOSE-BRACE are
+the domain's element values for `$`/`{`/`}`, NAME-CHAR-P tests whether an
+element can continue a bare `$name`, and EMIT-LITERAL/EMIT-CAPTURE each
+write one element or one designator's capture value to OUTPUT. Returns
+OUTPUT."
+  (loop with length = (length template)
+        for position from 0 below length
+        for element = (elt template position)
+        do (cond
+             ((not (eql element dollar)) (funcall emit-literal element output))
+             ((= (1+ position) length) (funcall emit-literal dollar output))
+             ((eql (elt template (1+ position)) dollar)
+              (funcall emit-literal dollar output)
+              (incf position))
+             ((eql (elt template (1+ position)) open-brace)
+              (let ((end (position close-brace template :start (+ position 2))))
+                (if end
+                    (progn
+                      (when (> end (+ position 2))
+                        (funcall emit-capture (subseq template (+ position 2) end) output))
+                      (setf position end))
+                    (funcall emit-literal dollar output))))
+             (t
+              (let ((end (loop for end from (1+ position) below length
+                                while (funcall name-char-p (elt template end))
+                                finally (return end))))
+                (if (= end (1+ position))
+                    (funcall emit-literal dollar output)
+                    (progn
+                      (funcall emit-capture (subseq template (1+ position) end) output)
+                      (setf position (1- end)))))))
+        finally (return output)))
+
 (defun expand-replacement-template (template match-result text)
   "Expand Rust-style dollar captures in TEMPLATE for MATCH-RESULT."
   (with-output-to-string (output)
-    (loop with length = (length template)
-          for position from 0 below length
-          for character = (char template position)
-          do (cond
-        ((char/= character #\$) (write-char character output))
-        ((= (1+ position) length) (write-char #\$ output))
-        ((char= (char template (1+ position)) #\$)
-          (write-char #\$ output)
-          (incf position))
-        ((char= (char template (1+ position)) #\{)
-          (let ((end (position #\} template :start (+ position 2))))
-            (if end (let ((token (subseq template (+ position 2) end)))
-                (when (plusp (length token))
-                  (write-string
-                    (replacement-capture-string match-result text (replacement-designator token))
-                    output))
-                (setf position end))
-              (write-char #\$ output))))
-        (t
-          (let ((end
-                (loop for
-                      end from (1+ position) below length
-                      while (replacement-name-character-p (char template end))
-                      finally (return end))))
-            (if (= end (1+ position)) (write-char #\$ output)
-              (progn
-                (write-string
-                  (replacement-capture-string
-                    match-result
-                    text
-                    (replacement-designator (subseq template (1+ position) end)))
-                  output)
-                (setf position (1- end))))))))))
+    (expand-replacement-template-generic
+     template #\$ #\{ #\}
+     #'replacement-name-character-p
+     (lambda (character output) (write-char character output))
+     (lambda (token output)
+       (write-string
+        (replacement-capture-string match-result text (replacement-designator token))
+        output))
+     output)))
 
 (defun expand-byte-replacement-template (template match-result text)
   "Expand Rust-style ASCII dollar captures in byte TEMPLATE."
-  (let ((output
-        (make-array 0 :element-type '(unsigned-byte 8) :adjustable t :fill-pointer 0)))
-    (labels ((append-octets (octets)
-               (loop for octet across octets
-                do (vector-push-extend octet output)))
-             (append-capture (token)
-               (when (every
-              (lambda (octet)
-                (< octet 128))
-              token)
-            (let ((name (map 'string #'ascii-octet-character token)))
-              (append-octets
-                (replacement-capture
-                  match-result
-                  text
-                  (if (every #'digit-char-p name) (parse-integer name)
-                    name)
-                  (empty-octet-vector)))))))
-      (loop with length = (length template)
-            for position from 0 below length
-            for octet = (aref template position)
-            do (cond
-          ((/= octet #x24) (vector-push-extend octet output))
-          ((= (1+ position) length) (vector-push-extend #x24 output))
-          ((= (aref template (1+ position)) #x24)
-            (vector-push-extend #x24 output)
-            (incf position))
-          ((= (aref template (1+ position)) #x7b)
-            (let ((end (position #x7d template :start (+ position 2))))
-              (if end (progn
-                  (when (> end (+ position 2))
-                    (append-capture (subseq template (+ position 2) end)))
-                  (setf position end))
-                (vector-push-extend #x24 output))))
-          (t
-            (let ((end
-                  (loop for
-                        end from (1+ position) below length
-                        for character = (ascii-octet-character (aref template end))
-                        while (and character (replacement-name-character-p character))
-                        finally (return end))))
-              (if (= end (1+ position)) (vector-push-extend #x24 output)
-                (progn
-                  (append-capture (subseq template (1+ position) end))
-                  (setf position (1- end))))))))
-      output)))
+  (expand-replacement-template-generic
+   template #x24 #x7b #x7d
+   (lambda (octet)
+     (let ((character (ascii-octet-character octet)))
+       (and character (replacement-name-character-p character))))
+   (lambda (octet output) (vector-push-extend octet output))
+   (lambda (token output)
+     (when (every (lambda (octet) (< octet 128)) token)
+       (let ((name (map 'string #'ascii-octet-character token)))
+         (loop for octet across (replacement-capture
+                                  match-result text
+                                  (if (every #'digit-char-p name) (parse-integer name) name)
+                                  (empty-octet-vector))
+               do (vector-push-extend octet output)))))
+   (make-array 0 :element-type '(unsigned-byte 8) :adjustable t :fill-pointer 0)))
 
 (defun replacement-string (replacement match-result text)
   (let ((value
@@ -169,6 +151,23 @@ REPLACEMENT is a Rust-style template string or a function of result and text."
 (defun valid-replacement-limit-p (limit)
   (or (null limit) (and (integerp limit) (not (minusp limit)))))
 
+(defun accumulate-replacements (regex text replacement limit start end timeout append)
+  "Shared DO-MATCHES accumulation loop for REPLACE-UP-TO's byte/string
+domains: calls (FUNCALL APPEND span) once per literal span between matches
+and once per expanded REPLACEMENT value, up to LIMIT replacements. APPEND is
+the one thing that differs per domain -- push octets onto an adjustable
+vector, or write a string onto a stream -- so it is supplied as a
+continuation rather than duplicating this loop once per domain."
+  (let ((position 0) (replacement-count 0))
+    (do-matches (result regex text :start start :end end :timeout timeout)
+      (when (and limit (>= replacement-count limit))
+        (return))
+      (funcall append (subseq text position (match-start result)))
+      (funcall append (replacement-value regex replacement result text))
+      (setf position (match-end result))
+      (incf replacement-count))
+    (funcall append (subseq text position))))
+
 (defun replace-up-to (regex text replacement limit start end timeout)
   (unless (valid-replacement-limit-p limit)
     (error 'type-error :datum limit :expected-type '(or null (integer 0 *))))
@@ -178,35 +177,16 @@ REPLACEMENT is a Rust-style template string or a function of result and text."
   (validate-replacement regex replacement)
   (when (zerop (or limit 1))
     (return-from replace-up-to text))
-  (if (byte-regex-p regex) (let ((output
-          (make-array 0 :element-type '(unsigned-byte 8) :adjustable t :fill-pointer 0))
-          (position 0)
-          (replacement-count 0))
-      (flet ((append-octets (octets)
-                 (loop for octet across octets
-                  do (vector-push-extend octet output))))
-        (do-matches
-          (result regex text :start start :end end :timeout timeout)
-          (when (and limit (>= replacement-count limit))
-            (return))
-          (append-octets (subseq text position (match-start result)))
-          (append-octets (replacement-value regex replacement result text))
-          (setf position (match-end result))
-          (incf replacement-count))
-        (append-octets (subseq text position))
-        output))
-    (with-output-to-string (output)
-      (let ((position 0)
-            (replacement-count 0))
-        (do-matches
-          (result regex text :start start :end end :timeout timeout)
-          (when (and limit (>= replacement-count limit))
-            (return))
-          (write-string (subseq text position (match-start result)) output)
-          (write-string (replacement-value regex replacement result text) output)
-          (setf position (match-end result))
-          (incf replacement-count))
-        (write-string (subseq text position) output)))))
+  (if (byte-regex-p regex)
+      (let ((output (make-array 0 :element-type '(unsigned-byte 8) :adjustable t :fill-pointer 0)))
+        (accumulate-replacements
+         regex text replacement limit start end timeout
+         (lambda (octets) (loop for octet across octets do (vector-push-extend octet output))))
+        output)
+      (with-output-to-string (output)
+        (accumulate-replacements
+         regex text replacement limit start end timeout
+         (lambda (string) (write-string string output))))))
 
 (defun replace-n (regex text replacement count &key (start 0) end timeout)
   "Replace at most COUNT non-overlapping matches of REGEX in TEXT.

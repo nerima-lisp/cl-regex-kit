@@ -45,19 +45,26 @@ This follows Rust regex-syntax's conservative meta-character quoting."
         (write-char #\\ output))
       (write-char character output))))
 
+(defun validate-literal-compiler-options (macro-name options)
+  "Signal an error unless OPTIONS is a compile-time keyword argument list.
+
+Shared by every literal-compiling macro (REGEX, BYTE-REGEX, REGEX-SET,
+BYTE-REGEX-SET) so each one states only its own MACRO-NAME and pattern shape."
+  (unless (evenp (length options))
+    (error "~A options must be a keyword argument list, got: ~S" macro-name options))
+  (loop for (key value) on options by #'cddr do
+    (unless (keywordp key)
+      (error "~A options must use keyword names, got: ~S" macro-name key))
+    (unless (constantp value)
+      (error "~A options must be compile-time constants, got: ~S" macro-name value))))
+
 (defmacro regex (pattern &rest options)
   "Compile the literal PATTERN once when the containing file is loaded.
 
 OPTIONS are passed to COMPILE-REGEX."
   (unless (stringp pattern)
     (error "REGEX requires a string literal, got: ~S" pattern))
-  (unless (evenp (length options))
-    (error "REGEX options must be a keyword argument list, got: ~S" options))
-  (loop for (key value) on options by #'cddr do
-    (unless (keywordp key)
-      (error "REGEX options must use keyword names, got: ~S" key))
-    (unless (constantp value)
-      (error "REGEX options must be compile-time constants, got: ~S" value)))
+  (validate-literal-compiler-options "REGEX" options)
   `(load-time-value (compile-regex ,pattern ,@options) t))
 
 (defmacro byte-regex (pattern &rest options)
@@ -66,13 +73,7 @@ OPTIONS are passed to COMPILE-REGEX."
 OPTIONS are passed to COMPILE-BYTE-REGEX."
   (unless (stringp pattern)
     (error "BYTE-REGEX requires a string literal, got: ~S" pattern))
-  (unless (evenp (length options))
-    (error "BYTE-REGEX options must be a keyword argument list, got: ~S" options))
-  (loop for (key value) on options by #'cddr do
-    (unless (keywordp key)
-      (error "BYTE-REGEX options must use keyword names, got: ~S" key))
-    (unless (constantp value)
-      (error "BYTE-REGEX options must be compile-time constants, got: ~S" value)))
+  (validate-literal-compiler-options "BYTE-REGEX" options)
   `(load-time-value (compile-byte-regex ,pattern ,@options) t))
 
 (defun collect-group-names (node)
@@ -132,35 +133,84 @@ OPTIONS are passed to COMPILE-BYTE-REGEX."
                    (line-terminator #\Newline)
                    (size-limit +maximum-instruction-count+)
                    (nest-limit +default-nest-limit+))
-  "Validate the keyword options shared by regex and regex-set compilation."
+  "Validate the keyword options shared by regex and regex-set compilation.
+
+Returns (values LINE-TERMINATOR FLAGS): the normalized line terminator and
+the parser flag bitmask MAKE-PARSER-FLAGS derives from the boolean options,
+computed here once so COMPILE-REGEX/COMPILE-BYTE-REGEX pass PARSE-REGEX the
+exact flags this validation already checked, rather than a second,
+independently-computed call that could silently drift from it."
   (check-type byte-mode-p boolean)
-  (make-parser-flags
-   :case-insensitive case-insensitive
-   :multi-line multi-line
-   :dot-matches-new-line dot-matches-new-line
-   :swap-greed swap-greed
-   :ignore-whitespace ignore-whitespace
-   :unicode unicode
-   :crlf crlf)
-  (check-type literal boolean)
-  (check-type never-capture boolean)
-  (check-type never-newline boolean)
-  (check-type octal boolean)
-  (check-type nest-limit (integer 0 *))
-  (check-type size-limit (integer 1 *))
-  (cond
-    ((characterp line-terminator)
-     (when (> (char-code line-terminator) #x7f)
-       (error 'type-error :datum line-terminator :expected-type 'character))
-     line-terminator)
-    ((and byte-mode-p (typep line-terminator '(integer 0 255)))
-     (code-char line-terminator))
-    (t
-     (error 'type-error
-            :datum line-terminator
-            :expected-type (if byte-mode-p
-                               '(or character (integer 0 255))
-                               'character)))))
+  (let ((flags (make-parser-flags
+                :case-insensitive case-insensitive
+                :multi-line multi-line
+                :dot-matches-new-line dot-matches-new-line
+                :swap-greed swap-greed
+                :ignore-whitespace ignore-whitespace
+                :unicode unicode
+                :crlf crlf)))
+    (check-type literal boolean)
+    (check-type never-capture boolean)
+    (check-type never-newline boolean)
+    (check-type octal boolean)
+    (check-type nest-limit (integer 0 *))
+    (check-type size-limit (integer 1 *))
+    (values
+     (cond
+       ((characterp line-terminator)
+        (when (> (char-code line-terminator) #x7f)
+          (error 'type-error :datum line-terminator :expected-type 'character))
+        line-terminator)
+       ((and byte-mode-p (typep line-terminator '(integer 0 255)))
+        (code-char line-terminator))
+       (t
+        (error 'type-error
+               :datum line-terminator
+               :expected-type (if byte-mode-p
+                                  '(or character (integer 0 255))
+                                  'character))))
+     flags)))
+
+(defun finish-compiled-regex (ast pattern byte-mode-p size-limit never-newline)
+  "Shared tail of COMPILE-REGEX/COMPILE-BYTE-REGEX: compile AST to an NFA
+program and wrap it as a REGEX instance."
+  (multiple-value-bind (program group-count)
+      (compile-to-nfa ast pattern :instruction-limit size-limit)
+    (multiple-value-bind (static-group-count static-p)
+        (ast-static-capture-count ast)
+      (make-instance 'regex :program program :group-count group-count
+                     :static-capture-count (and static-p (1+ static-group-count))
+                     :group-names (collect-group-names ast) :source (copy-seq pattern)
+                     :never-newline-p never-newline :byte-mode-p byte-mode-p))))
+
+(defun %compile-pattern (pattern byte-mode-p case-insensitive multi-line dot-matches-new-line
+                          swap-greed ignore-whitespace unicode crlf literal never-capture
+                          never-newline octal line-terminator size-limit nest-limit)
+  "Shared body of COMPILE-REGEX and COMPILE-BYTE-REGEX, which differ only in
+BYTE-MODE-P: whether PARSE-REGEX runs in byte mode, whether the resulting AST
+is UTF-8-normalized, and whether the invalid-UTF-8-admission check applies
+(byte regexes are meant to admit arbitrary octets; character regexes, which
+match Lisp strings, cannot represent an invalid one)."
+  (multiple-value-bind (line-terminator flags)
+      (validate-regex-compile-options
+       byte-mode-p
+       :case-insensitive case-insensitive :multi-line multi-line
+       :dot-matches-new-line dot-matches-new-line :swap-greed swap-greed
+       :ignore-whitespace ignore-whitespace :unicode unicode :crlf crlf
+       :literal literal :never-capture never-capture :never-newline never-newline
+       :octal octal :line-terminator line-terminator :size-limit size-limit
+       :nest-limit nest-limit)
+    (let ((ast (parse-regex pattern :initial-flags flags :nest-limit nest-limit
+                             :byte-mode byte-mode-p :literal literal
+                             :never-capture never-capture :octal octal
+                             :line-terminator line-terminator)))
+      (if byte-mode-p
+          (setf ast (normalize-byte-literals ast))
+          (when (ast-can-match-invalid-utf8-p ast)
+            (error 'regex-syntax-error
+                   :pattern pattern
+                   :reason "Character regexes cannot match invalid UTF-8 bytes")))
+      (finish-compiled-regex ast pattern byte-mode-p size-limit never-newline))))
 
 (defun compile-regex (pattern &key case-insensitive multi-line
                                 dot-matches-new-line swap-greed
@@ -171,48 +221,9 @@ OPTIONS are passed to COMPILE-BYTE-REGEX."
                                 (size-limit +maximum-instruction-count+)
                                 (nest-limit +default-nest-limit+))
   "Compile PATTERN for string matching with RE2/Rust-compatible options."
-  (let ((line-terminator
-          (validate-regex-compile-options
-           nil
-           :case-insensitive case-insensitive
-           :multi-line multi-line
-           :dot-matches-new-line dot-matches-new-line
-           :swap-greed swap-greed
-           :ignore-whitespace ignore-whitespace
-           :unicode unicode
-           :crlf crlf
-           :literal literal
-           :never-capture never-capture
-           :never-newline never-newline
-           :octal octal
-           :line-terminator line-terminator
-           :size-limit size-limit
-           :nest-limit nest-limit)))
-    (let ((ast (parse-regex pattern
-                          :initial-flags (make-parser-flags
-                                          :case-insensitive case-insensitive
-                                          :multi-line multi-line
-                                          :dot-matches-new-line dot-matches-new-line
-                                          :swap-greed swap-greed
-                                          :ignore-whitespace ignore-whitespace
-                                          :unicode unicode :crlf crlf)
-                          :nest-limit nest-limit
-                          :literal literal
-                          :never-capture never-capture
-                          :octal octal
-                          :line-terminator line-terminator)))
-    (when (ast-can-match-invalid-utf8-p ast)
-      (error 'regex-syntax-error
-             :pattern pattern
-             :reason "Character regexes cannot match invalid UTF-8 bytes"))
-    (multiple-value-bind (program group-count)
-        (compile-to-nfa ast pattern :instruction-limit size-limit)
-      (multiple-value-bind (static-group-count static-p)
-          (ast-static-capture-count ast)
-        (make-instance 'regex :program program :group-count group-count
-                       :static-capture-count (and static-p (1+ static-group-count))
-                       :group-names (collect-group-names ast) :source (copy-seq pattern)
-                       :never-newline-p never-newline))))))
+  (%compile-pattern pattern nil case-insensitive multi-line dot-matches-new-line
+                     swap-greed ignore-whitespace unicode crlf literal never-capture
+                     never-newline octal line-terminator size-limit nest-limit))
 
 (defun compile-byte-regex (pattern &key case-insensitive multi-line
                                      dot-matches-new-line swap-greed
@@ -223,46 +234,9 @@ OPTIONS are passed to COMPILE-BYTE-REGEX."
                                      (size-limit +maximum-instruction-count+)
                                      (nest-limit +default-nest-limit+))
   "Compile PATTERN for octet-vector matching with RE2/Rust-compatible options."
-  (let ((line-terminator
-          (validate-regex-compile-options
-           t
-           :case-insensitive case-insensitive
-           :multi-line multi-line
-           :dot-matches-new-line dot-matches-new-line
-           :swap-greed swap-greed
-           :ignore-whitespace ignore-whitespace
-           :unicode unicode
-           :crlf crlf
-           :literal literal
-           :never-capture never-capture
-           :never-newline never-newline
-           :octal octal
-           :line-terminator line-terminator
-           :size-limit size-limit
-           :nest-limit nest-limit)))
-    (let ((ast (parse-regex pattern
-                          :initial-flags (make-parser-flags
-                                          :case-insensitive case-insensitive
-                                          :multi-line multi-line
-                                          :dot-matches-new-line dot-matches-new-line
-                                          :swap-greed swap-greed
-                                          :ignore-whitespace ignore-whitespace
-                          :unicode unicode :crlf crlf)
-                          :nest-limit nest-limit
-                          :byte-mode t
-                          :literal literal
-                          :never-capture never-capture
-                          :octal octal
-                          :line-terminator line-terminator)))
-    (setf ast (normalize-byte-literals ast))
-    (multiple-value-bind (program group-count)
-        (compile-to-nfa ast pattern :instruction-limit size-limit)
-      (multiple-value-bind (static-group-count static-p)
-          (ast-static-capture-count ast)
-        (make-instance 'regex :program program :group-count group-count
-                       :static-capture-count (and static-p (1+ static-group-count))
-                       :group-names (collect-group-names ast) :source (copy-seq pattern)
-                       :never-newline-p never-newline :byte-mode-p t))))))
+  (%compile-pattern pattern t case-insensitive multi-line dot-matches-new-line
+                     swap-greed ignore-whitespace unicode crlf literal never-capture
+                     never-newline octal line-terminator size-limit nest-limit))
 
 (defun regex-capture-names (regex)
   "Return a fresh vector of capture names indexed by capture group."
