@@ -6,16 +6,18 @@ Cox documents in
 and its sequels, and the one RE2 and Rust's `regex` crate ship in production.
 
 ```text
-pattern string --[parser.lisp]--> REGEX-NODE tree --[nfa.lisp]--> INST program --[pike-vm.lisp]--> MATCH-RESULT
+pattern string --[regex-tokenizer.lisp]--> token vector --[regex-grammar.lisp]--> REGEX-NODE tree --[nfa.lisp]--> INST program --[pike-vm.lisp]--> MATCH-RESULT
 ```
 
-## 1. Parsing (`src/parser.lisp`, `src/ast.lisp`)
+## 1. Parsing (`src/regex-tokenizer.lisp`, `src/regex-grammar.lisp`, `src/ast.lisp`)
 
-`parse-regex` is a recursive-descent parser: alternation over concatenations,
-concatenation over repeated atoms, an atom is a literal, a group, a character
-class, `.`, or an anchor. It produces a tree of `regex-node` subclasses
-(`ast.lisp`) -- one class per syntax feature, with no separate "optimized"
-tree, since the next stage compiles this shape directly.
+`parse-regex` first tokenizes the pattern into a `(vector cl-parser-kit:token)`
+(`regex-tokenizer.lisp`), then runs a recursive-descent parser over that token
+vector (`regex-grammar.lisp`/`regex-grammar-classes.lisp`): alternation over
+concatenations, concatenation over repeated atoms, an atom is a literal, a
+group, a character class, `.`, or an anchor. It produces a tree of
+`regex-node` subclasses (`ast.lisp`) -- one class per syntax feature, with no
+separate "optimized" tree, since the next stage compiles this shape directly.
 
 ## 2. Thompson construction (`src/nfa.lisp`)
 
