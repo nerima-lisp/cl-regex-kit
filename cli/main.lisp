@@ -55,7 +55,7 @@ grep-compatible exit code (0 on at least one match, 1 on none, 2 on error)."
 (defparameter *app*
   (make-app
    :name "cl-regex-kit-grep"
-   :version "0.1.0"
+   :version "0.2.0"
    :summary "Print lines matching a RE2/Rust-compatible regular expression."
    :description "A small grep built directly on cl-regex-kit, for exercising the library as a real command-line tool."
    :global-options
