@@ -1,4 +1,12 @@
 ;;;; cl-regex-kit.asd
+
+;;;; This form comes FIRST, before any defsystem. ASDF binds *package* to
+;;;; ASDF-USER only for a file it loads itself; read any other way -- a REPL
+;;;; `load`, an editor evaluating the buffer, flake.nix parsing :version -- the
+;;;; file is read in whatever package happens to be current. Saying it makes
+;;;; the file self-contained.
+(in-package #:asdf-user)
+
 (asdf:defsystem "cl-regex-kit"
   :description "A from-scratch regular expression engine for Common Lisp, built on Thompson NFA construction and Pike's VM for linear-time matching"
   :long-description "cl-regex-kit compiles a pattern to an AST, then to a Thompson-constructed NFA program, and matches it with a Pike VM thread simulation -- the architecture used by RE2 and the Rust regex crate -- so matching time is linear in the input regardless of the pattern. Backreferences and lookaround are out of scope because they cannot be expressed by a finite automaton without giving up that guarantee."

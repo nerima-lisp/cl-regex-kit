@@ -68,14 +68,16 @@
     let
       lib = nixpkgs.lib;
 
-      # Only what is verified: x86_64-linux by CI, aarch64-darwin by the
-      # maintainer's `nix flake check` on every local run. Do NOT pass
-      # --all-systems in ci.yml: the runner is x86_64-linux and would try to
-      # evaluate the darwin derivations and fail.
-      systems = [
-        "x86_64-linux"
-        "aarch64-darwin"
-      ];
+      # Only what is verified, and CI verifies exactly one platform:
+      # x86_64-linux. aarch64-darwin was dropped in the 2026-08-01 revision of
+      # PACKAGE_STANDARD.md -- it rested on a local `nix flake check` nothing
+      # enforces. Do NOT pass --all-systems in ci.yml: with a single-element
+      # list it changes nothing.
+      #
+      # Consequence: `nix develop` and `nix build` no longer resolve on macOS,
+      # because mkPackageFlake generates packages/checks/apps/devShells from
+      # this one list. Development happens on Linux.
+      systems = [ "x86_64-linux" ];
 
       meta = {
         description = "A from-scratch regular expression engine for Common Lisp, built on Thompson NFA construction and Pike's VM for linear-time matching";
