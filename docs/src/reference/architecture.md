@@ -40,7 +40,14 @@ src/
                   character-class body grammar: `[...]`, POSIX classes, set
                   operators, over the same token vector
   nfa.lisp        COMPILE-TO-NFA: REGEX-NODE tree -> INST program (Thompson construction)
-  pike-vm.lisp    RUN-PIKE-VM: INST program -> MATCH-RESULT (thread simulation)
+  pike-vm-instructions.lisp
+                  VM thread/result structures and instruction predicates
+  pike-vm-closure.lisp
+                  shared epsilon-closure traversal
+  pike-vm-capture.lisp
+                  RUN-PIKE-VM: INST program -> MATCH-RESULT
+  pike-vm-set.lisp
+                  RUN-PIKE-VM-SET: merged INST program -> matching indexes
   api.lisp        compiled-regex model, compilation, literal macros, metadata
   api-match.lisp  input validation, timeout handling, scans, and match accessors
   api-operations.lisp
@@ -111,9 +118,9 @@ composition, case folding, and boundary predicates -- its own five-shape
 boundary/start/end/start-half/end-half algebra (word boundaries in ASCII
 byte, Unicode-aware byte, and string domains) is generated once by
 `DEFINE-BOUNDARY-PREDICATES` from a per-domain "who is a word character
-here" primitive, rather than written out three times. `pike-vm.lisp` executes
-matching and is the only stage that runs once per call to `scan` rather than
-once per call to `compile-regex`.
+here" primitive, rather than written out three times. The `pike-vm-*.lisp`
+files implement matching and are the only stage that runs once per call to
+`scan` rather than once per call to `compile-regex`.
 
 ## Why compilation and matching are split
 
@@ -155,14 +162,10 @@ which VM entry point to call and with which flags. `do-matches`/`do-captures`
 (`api-operations.lisp`) and `call-with-timeout` (`api-match.lisp`) already used
 this shape (a macro body, or a caller-supplied closure, run under a
 controlling function); these two additions extend it to the validate-then-run
-path shared by every one-shot match entry point. `pike-vm.lisp`'s
-`pike-vm-closure` is the same idea applied to `run-pike-vm`/`run-pike-vm-set`'s
-epsilon-closure walk: the ~130-line `:split`/`:jmp`/`:save`/zero-width
-traversal was duplicated once per entry point, differing only in whether
-`:save` updates a capture-slot vector; factoring it into one function taking
-an optional `on-save` callback removes the duplication without forcing
-set-matching's uncaptured threads through the same slot bookkeeping
-capturing matches needs.
+path shared by every one-shot match entry point. `pike-vm-closure.lisp`
+provides the epsilon-closure walks used by `run-pike-vm` and
+`run-pike-vm-set`; `pike-vm-capture.lisp` owns capture-slot bookkeeping, while
+`pike-vm-set.lisp` tracks matching pattern indexes without capture slots.
 
 ## Macro-centric design and its limits
 

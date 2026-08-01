@@ -108,7 +108,7 @@ without changing the immutable AST nodes referenced by consuming instructions."
 (defun alternate (left right)
   (let ((index (emit :split (fragment-start left) (fragment-start right))))
     (make-fragment :start index
-                   :outs (nconc (fragment-outs left) (fragment-outs right)))))
+                   :outs (nconc (fragment-outs right) (fragment-outs left)))))
 
 (defun optional-fragment (fragment greedy-p)
   (let ((index (if greedy-p

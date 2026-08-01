@@ -218,9 +218,43 @@
       (expect (cl-regex-kit::byte-unicode-non-boundary-position-p text 3)
               :to-be-truthy))))
 
+(it "decodes UTF-8 scalars backward without accepting malformed boundaries"
+  (flet ((octets (&rest values)
+           (make-array (length values)
+                       :element-type (quote (unsigned-byte 8))
+                       :initial-contents values))
+         (decode-before (text position)
+           (multiple-value-list
+            (cl-regex-kit::utf8-character-before text position))))
+    (dolist (case
+             (list
+              (list (list 65) 1 (list #\A 0 t))
+              (list (list 195 169) 2 (list (code-char #x00e9) 0 t))
+              (list (list 226 152 131) 3 (list (code-char #x2603) 0 t))
+              (list (list 240 159 152 128) 4
+                    (list (code-char #x1f600) 0 t))))
+      (destructuring-bind (values position expected) case
+        (expect (decode-before (apply (function octets) values) position)
+                :to-equal expected)))
+    (dolist (case
+             (list
+              (list (list 128) 1)
+              (list (list 194) 1)
+              (list (list 195 169) 1)
+              (list (list 97 128) 2)
+              (list (list 226 130) 2)
+              (list (list 240 159 152) 3)))
+      (destructuring-bind (values position) case
+        (expect (decode-before (apply (function octets) values) position)
+                :to-equal (list nil nil nil))))
+    (let ((text (octets #x61 #xc3 #xa9)))
+      (expect (decode-before text 0) :to-equal (list nil nil nil))
+      (expect (decode-before text 4) :to-equal (list nil nil nil)))))
+
+
 (it "evaluates composed character and byte class matchers"
   (let ((ranges '(:ranges ((97 . 99))))
-        (property '(:property "Lu")))
+        (property (list :property (cl-regex-kit::resolve-unicode-property "Lu"))))
     (expect (cl-regex-kit::matcher-matches-p ranges #\b) :to-be-truthy)
     (expect (cl-regex-kit::matcher-matches-p property #\A) :to-be-truthy)
     (expect (cl-regex-kit::matcher-matches-p `(:union ,ranges ,property) #\A)
@@ -304,3 +338,228 @@
       (expect (cl-regex-kit::line-start-p text 3 t #\Newline) :to-be-truthy)
       (expect (cl-regex-kit::line-end-p text 1 t #\Newline) :to-be-truthy)
       (expect (cl-regex-kit::line-end-p text 2 t #\Newline) :to-be-null))))
+
+(it "keeps string and UTF-8 octet boundary domains distinct at input edges"
+  (flet ((octets (&rest values)
+           (make-array (length values)
+                       :element-type (quote (unsigned-byte 8))
+                       :initial-contents values)))
+    (let ((text "a"))
+      (expect (cl-regex-kit::word-start-p text 0 t) :to-be-truthy)
+      (expect (cl-regex-kit::word-end-p text 1 t) :to-be-truthy)
+      (expect (cl-regex-kit::word-boundary-p text 0 t) :to-be-truthy)
+      (expect (cl-regex-kit::word-boundary-p text 1 t) :to-be-truthy))
+    (let ((text (octets #xc3 #xa9)))
+      (expect (cl-regex-kit::byte-unicode-word-start-p text 0) :to-be-truthy)
+      (expect (cl-regex-kit::byte-unicode-word-end-p text 2) :to-be-truthy)
+      (expect (cl-regex-kit::byte-unicode-word-boundary-p text 0) :to-be-truthy)
+      (expect (cl-regex-kit::byte-unicode-word-boundary-p text 1) :to-be-null)
+      (expect (cl-regex-kit::byte-unicode-word-boundary-p text 2) :to-be-truthy))
+    (let ((malformed (octets #x80)))
+      (expect (cl-regex-kit::byte-unicode-non-boundary-position-p malformed 0)
+              :to-be-null)
+      (expect (cl-regex-kit::byte-unicode-non-boundary-position-p malformed 1)
+              :to-be-null))))
+(it
+  "executes pre-resolved Unicode descriptors without resolver work"
+  (let ((explicit (compile-regex "\\p{Lu}+"))
+        (negated (compile-regex "\\P{Lu}+"))
+        (digit (compile-regex "\\d+"))
+        (word (compile-regex "\\w+"))
+        (space (compile-regex "\\s+"))
+        (class-property (compile-regex "[\\p{Greek}]+")))
+    (expect (is-match-p explicit "ABC") :to-be-truthy)
+    (expect (is-match-p negated "abc") :to-be-truthy)
+    (expect (is-match-p digit (string (code-char #xff11))) :to-be-truthy)
+    (expect (is-match-p word (string (code-char #x200c))) :to-be-truthy)
+    (expect (is-match-p space (string (code-char #x3000))) :to-be-truthy)
+    (expect (is-match-p class-property "α") :to-be-truthy))
+  (dolist (case `(("Lu" #\A t)
+                  ("Lu" #\a nil)
+                  ("Nd" ,(code-char #xff11) t)
+                  ("White_Space" ,(code-char #x3000) t)
+                  ("Greek" #\α t)))
+    (destructuring-bind (name character expected) case
+      (let ((descriptor
+              (or (cl-regex-kit::resolve-unicode-property name)
+                  (error "Unicode property did not resolve: ~A" name))))
+        (expect
+          (not
+            (null
+              (cl-regex-kit::unicode-property-descriptor-matches-p
+                descriptor
+                character)))
+          :to-equal
+          expected)))))
+(it
+  "matches packed Unicode ranges at binary-search boundaries"
+  (labels ((matches-p (packed code)
+             (cl-regex-kit::packed-unicode-ranges-match-code-p packed code)))
+    (let ((packed (cl-regex-kit::pack-unicode-property-ranges nil)))
+      (expect (length packed) :to-equal 0)
+      (expect (matches-p packed 0) :to-be-null)
+      (expect (matches-p packed (1- char-code-limit)) :to-be-null))
+    (let ((packed
+            (cl-regex-kit::pack-unicode-property-ranges
+              (loop for lower from 0 below 24 by 3
+                    collect (cons lower (1+ lower))))))
+      (expect (matches-p packed 0) :to-be-truthy)
+      (expect (matches-p packed 22) :to-be-truthy)
+      (expect (matches-p packed 2) :to-be-null)
+      (expect (matches-p packed 23) :to-be-null)
+      (expect (matches-p packed (1- char-code-limit)) :to-be-null))
+    (let ((packed
+            (cl-regex-kit::pack-unicode-property-ranges
+              `((0 . 1)
+                (3 . 4)
+                (6 . 7)
+                (9 . 10)
+                (12 . 13)
+                (15 . 16)
+                (18 . 19)
+                (21 . 22)
+                (,(1- char-code-limit) . ,(1- char-code-limit))))))
+      (expect (matches-p packed 0) :to-be-truthy)
+      (expect (matches-p packed 22) :to-be-truthy)
+      (expect (matches-p packed 2) :to-be-null)
+      (expect (matches-p packed 23) :to-be-null)
+      (expect (matches-p packed (1- char-code-limit)) :to-be-truthy))))
+(it
+  "rejects malformed packed Unicode ranges"
+  (signals error
+    (cl-regex-kit::pack-unicode-property-ranges `((0 . ,char-code-limit))))
+  (signals error
+    (cl-regex-kit::pack-unicode-property-ranges `((,(1- char-code-limit) . ,char-code-limit))))
+  (signals error
+    (cl-regex-kit::pack-unicode-property-ranges (quote ((-1 . 0)))))
+  (signals error
+    (cl-regex-kit::pack-unicode-property-ranges (quote ((3 . 2)))))
+  (signals error
+    (cl-regex-kit::pack-unicode-property-ranges (quote ((3 . 4) (1 . 2)))))
+  (signals error
+    (cl-regex-kit::pack-unicode-property-ranges (quote ((1 . 3) (3 . 4))))))
+(it
+  "treats representative Unicode property aliases equivalently"
+  (labels ((matches-p (property character)
+             (let ((descriptor
+                     (or (cl-regex-kit::resolve-unicode-property property)
+                         (error "Unicode property did not resolve: ~A" property))))
+               (not
+                 (null
+                   (cl-regex-kit::unicode-property-descriptor-matches-p
+                     descriptor
+                     character)))))
+           (expect-equivalent (left right character)
+             (expect (matches-p left character)
+                     :to-equal
+                     (matches-p right character))))
+    (expect-equivalent "Lu" "General_Category=Uppercase_Letter" #\A)
+    (expect-equivalent "sc=Grek" "Script=Greek" #\α)
+    (expect-equivalent "scx=Grek" "Script_Extensions=Greek" #\α)
+    (expect-equivalent "blk=Basic_Latin" "InBasic_Latin" #\A)
+    (expect-equivalent "age=1.1" "Age=V1_1" #\A)
+    (expect-equivalent "GCB=EX" "Grapheme_Cluster_Break=Extend"
+                       (code-char #x0301))
+    (expect-equivalent "WB=LE" "Word_Break=ALetter" #\a)
+    (expect-equivalent "SB=UP" "Sentence_Break=Upper" #\A)))
+(it "uses finite SBCL Unicode metadata without keyword-package coupling"
+  (labels ((descriptor (name)
+             (or (cl-regex-kit::resolve-unicode-property name)
+                 (error "Unicode property did not resolve: ~A" name)))
+           (matches-p (name character)
+             (cl-regex-kit::unicode-property-descriptor-matches-p
+              (descriptor name)
+              character)))
+    (dolist (case (list
+                   (list "General_Category=Uppercase_Letter" #\A)
+                   (list "Script=Greek" #\α)
+                   (list "Script_Extensions=Greek" #\α)
+                   (list "Block=Basic_Latin" #\A)
+                   (list "Grapheme_Cluster_Break=Extend" (code-char #x0301))
+                   (list "Word_Break=ALetter" #\a)
+                   (list "Sentence_Break=Upper" #\A)))
+      (expect (matches-p (first case) (second case)) :to-be-truthy))
+    (dolist (case (quote ((:category "LU" "Lu")
+                          (:script "GREEK" "Script=Greek")
+                          (:block "BASICLATIN" "Block=Basic_Latin")
+                          (:grapheme-break "EXTEND" "GCB=Extend")
+                          (:word-break "ALETTER" "WB=ALetter")
+                          (:sentence-break "UPPER" "SB=Upper"))))
+      (destructuring-bind (domain value-name property-name) case
+        (multiple-value-bind (value present-p)
+            (cl-regex-kit::unicode-runtime-property-value domain value-name)
+          (expect present-p :to-be-truthy)
+          (expect
+           (eq value
+               (cl-regex-kit::unicode-property-descriptor-payload
+                (descriptor property-name)))
+           :to-be-truthy))))
+    (dolist (case (quote ((:grapheme-break "GCB=Other")
+                          (:word-break "WB=Other")
+                          (:sentence-break "SB=Other"))))
+      (destructuring-bind (domain property-name) case
+        (multiple-value-bind (value present-p)
+            (cl-regex-kit::unicode-runtime-property-value domain "OTHER")
+          (expect value :to-be-null)
+          (expect present-p :to-be-truthy)
+          (expect
+           (cl-regex-kit::unicode-property-descriptor-payload
+            (descriptor property-name))
+           :to-be-null))))
+    (let ((payload-before-keyword-intern
+            (cl-regex-kit::unicode-property-descriptor-payload
+             (descriptor "Script=Greek"))))
+      (intern "G_R_E_E_K" "KEYWORD")
+      (expect
+       (eq payload-before-keyword-intern
+           (cl-regex-kit::unicode-property-descriptor-payload
+            (descriptor "Script=Greek")))
+       :to-be-truthy))
+    (signals error
+      (cl-regex-kit::make-unicode-runtime-domain-index
+       :script
+       (list (make-symbol "A-B") (make-symbol "A_B"))))
+    (let* ((middle-dot (code-char #x00b7))
+           (script
+             (cl-regex-kit::unicode-property-descriptor-payload
+              (descriptor "Script=Greek")))
+           (script-extension
+             (cl-regex-kit::unicode-property-descriptor-payload
+              (descriptor "Script_Extensions=Greek"))))
+      (expect (eq (sb-unicode:script middle-dot) script) :to-be-null)
+      (expect (eq (car script-extension) script) :to-be-truthy)
+      (expect (matches-p "Script_Extensions=Greek" #\A) :to-be-null)
+      (expect (matches-p "Script_Extensions=Greek" middle-dot)
+              :to-be-truthy))))
+(it "rejects unknown Unicode descriptor and metadata inputs"
+  (signals error
+    (cl-regex-kit::unicode-property-descriptor-matches-p
+      (cl-regex-kit::%make-unicode-property-descriptor :unknown nil)
+      #\A))
+  (signals error
+    (cl-regex-kit::unicode-runtime-domain-index :unknown))
+  (signals error
+    (cl-regex-kit::unicode-runtime-property-value :unknown "VALUE"))
+  (signals error
+    (cl-regex-kit::unicode-runtime-category-values
+      (list "UNKNOWNCATEGORY")))
+  (dolist (property (list "GCB=UnknownValue"
+                          "WB=UnknownValue"
+                          "SB=UnknownValue"))
+    (expect (cl-regex-kit::resolve-unicode-property property)
+            :to-be-null)))
+(it "classifies ASCII and Unicode word boundaries by authoritative categories"
+  (expect (cl-regex-kit::word-character-p #\_ nil) :to-be-truthy)
+  (expect (cl-regex-kit::word-character-p #\! nil) :to-be-null)
+  (expect (cl-regex-kit::word-boundary-p "a_!" 1 nil) :to-be-null)
+  (expect (cl-regex-kit::word-boundary-p "a_!" 2 nil) :to-be-truthy)
+  (dolist (code (quote (#x0301 #x0903 #x0488 #x0660 #x203f #x200c #x200d)))
+    (let* ((character (code-char code))
+           (text (format nil "a~C!" character)))
+      (expect (cl-regex-kit::word-character-p character t) :to-be-truthy)
+      (expect (cl-regex-kit::word-boundary-p text 1 t) :to-be-null)
+      (expect (cl-regex-kit::word-boundary-p text 2 t) :to-be-truthy)))
+  (let ((symbol (code-char #x2603)))
+    (expect (cl-regex-kit::word-character-p symbol t) :to-be-null)
+    (expect (cl-regex-kit::word-boundary-p (format nil "a~C" symbol) 1 t)
+            :to-be-truthy)))

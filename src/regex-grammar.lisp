@@ -26,109 +26,9 @@
 ;;;; model and the tokenizer built on it.
 (in-package #:cl-regex-kit)
 
-(defun current-source-position ()
-  "The character offset the next token starts at, or the pattern's length at
-end of stream -- PARSE-REGEX's token-stream analogue of *REGEX-POSITION*,
-used only to locate FAIL's caret when no more specific offset applies."
-  (if (< *regex-token-position* (length *regex-tokens*))
-      (token-start (aref *regex-tokens* *regex-token-position*))
-      *regex-length*))
-
-(defun fail (reason &optional (at (current-source-position)))
-  (error 'regex-syntax-error :pattern *regex-pattern* :position at :reason reason))
-
-(defun regex-whitespace-token-p (token)
-  (and (eq (token-type token) :char) (sb-unicode:whitespace-p (token-value token))))
-
-(defun regex-comment-start-token-p (token)
-  (and (eq (token-type token) :char) (char= (token-value token) #\#)))
-
-(defun regex-newline-token-p (token)
-  (and (eq (token-type token) :char) (char= (token-value token) #\Newline)))
-
-(defun skip-extended-trivia (position)
-  "Advance POSITION past whitespace and `#`-comments when the live extended
-flag is set -- the token-stream analogue of SKIP-EXTENDED-SYNTAX."
-  (if (not (logtest +flag-extended+ *regex-flags*))
-      position
-      (let ((tokens *regex-tokens*) (length (length *regex-tokens*)))
-        (loop
-          (loop while (and (< position length) (regex-whitespace-token-p (aref tokens position)))
-                do (incf position))
-          (if (and (< position length) (regex-comment-start-token-p (aref tokens position)))
-              (progn
-                (loop while (and (< position length) (not (regex-newline-token-p (aref tokens position))))
-                      do (incf position))
-                (when (< position length) (incf position)))
-              (return position))))))
-
-(defun at-end-p ()
-  (>= (skip-extended-trivia *regex-token-position*) (length *regex-tokens*)))
-
-(defun peek-token ()
-  "The next significant token, skipping extended-mode trivia, or NIL at end
-of stream. Does not advance *REGEX-TOKEN-POSITION*."
-  (setf *regex-token-position* (skip-extended-trivia *regex-token-position*))
-  (and (< *regex-token-position* (length *regex-tokens*))
-       (aref *regex-tokens* *regex-token-position*)))
-
-(defun take-token ()
-  (let ((token (peek-token)))
-    (if token
-        (prog1 token (incf *regex-token-position*))
-        (fail "Unexpected end of pattern"))))
-
-(defun peek-type (&optional (type nil type-p))
-  "With no argument, the next significant token's type, or NIL at end of
-stream. With TYPE, whether the next significant token has that type."
-  (let ((token (peek-token)))
-    (if type-p (and token (eq (token-type token) type)) (and token (token-type token)))))
-
-(defun peek-value ()
-  (let ((token (peek-token))) (and token (token-value token))))
-
-(defun flag-p (flag) (logtest flag *regex-flags*))
-
-(defun digit-token-p (token) (and (eq (token-type token) :char) (digit-char-p (token-value token))))
-
-(defun ensure-byte-character (character)
-  (when (and *regex-byte-mode-p* (not (flag-p +flag-unicode+)) (> (char-code character) #xff))
-    (fail "Byte patterns only accept code points in the range 0..255"))
-  character)
-
-(defun ensure-byte-class-character (character raw-octet-p)
-  (when (and *regex-byte-mode-p* (not (flag-p +flag-unicode+)) (not raw-octet-p)
-             (> (char-code character) #x7f))
-    (fail "Unicode is not allowed in a non-Unicode byte character class"))
-  (ensure-byte-character character))
-
-(defun make-literal (character &key raw-octet-p)
-  (make-instance 'literal-node :char character :raw-octet-p raw-octet-p
-                 :case-insensitive-p (flag-p +flag-case-insensitive+)
-                 :unicode-p (flag-p +flag-unicode+)))
-
-(defun byte-matcher-p (matcher)
-  (case (first matcher)
-    (:ranges (every (lambda (range) (<= (cdr range) #xff)) (second matcher)))
-    (:property nil)
-    (:negate (byte-matcher-p (second matcher)))
-    ((:union :intersection :difference :symmetric-difference) (every #'byte-matcher-p (rest matcher)))
-    (otherwise nil)))
-
-(defun make-class (ranges &optional negated-p matcher)
-  (when (and *regex-byte-mode-p* (not (flag-p +flag-unicode+)) matcher (not (byte-matcher-p matcher)))
-    (fail "Unicode character classes are not available in byte patterns"))
-  (make-instance 'char-class-node :ranges ranges :matcher matcher :negated-p negated-p
-                 :case-insensitive-p (flag-p +flag-case-insensitive+)
-                 :unicode-p (flag-p +flag-unicode+)))
-
-(defun make-concat (children)
-  (cond ((null children) (make-instance 'concat-node :children nil))
-        ((null (cdr children)) (car children))
-        (t (make-instance 'concat-node :children children))))
-
 (defun parse-number ()
-  (let ((beginning (current-source-position)) (digits nil))
+  (let ((beginning (current-source-position))
+        (digits nil))
     (unless (and (peek-token) (digit-token-p (peek-token)))
       (fail "Expected a decimal number"))
     (loop while (and (peek-token) (digit-token-p (peek-token)))
@@ -139,14 +39,23 @@ stream. With TYPE, whether the next significant token has that type."
       count)))
 
 (defun read-group-name ()
-  (let ((beginning (current-source-position)) (characters nil))
-    (unless (and (peek-token) (not (eq (peek-type) :escape)) (capture-name-start-p (peek-value)))
+  (let ((beginning (current-source-position))
+        (characters nil))
+    (unless (and
+        (peek-token)
+        (not (eq (peek-type) :escape))
+        (capture-name-start-p (peek-value)))
       (fail "Capture name must start with an alphabetic character or underscore"))
-    (loop while (and (peek-token) (not (eq (peek-type) :escape)) (capture-name-character-p (peek-value)))
+    (loop while (and
+        (peek-token)
+        (not (eq (peek-type) :escape))
+        (capture-name-character-p (peek-value)))
           do (push (token-value (take-token)) characters))
     (let ((name (coerce (nreverse characters) 'string)))
-      (unless (peek-type :char) (fail "Unclosed capture name"))
-      (unless (char= (peek-value) #\>) (fail "Unclosed capture name"))
+      (unless (peek-type :char)
+        (fail "Unclosed capture name"))
+      (unless (char= (peek-value) #\>)
+        (fail "Unclosed capture name"))
       (take-token)
       (when (member name *regex-group-names* :test #'string=)
         (fail "Duplicate capture name" beginning))
@@ -154,79 +63,136 @@ stream. With TYPE, whether the next significant token has that type."
       name)))
 
 (defun parse-flags ()
-  (let ((enabled-p t) (seen-p nil) (disabled-p nil) (seen-flags nil))
-    (loop while (and (peek-type :char)
-                      (or (member (peek-value) '(#\i #\m #\s #\R #\U #\x #\u)) (char= (peek-value) #\-)))
-          do
-      (if (char= (peek-value) #\-)
-          (progn
-            (when disabled-p (fail "Inline flags may contain only one -"))
-            (take-token)
-            (setf enabled-p nil disabled-p t))
-          (let ((character (token-value (take-token))))
-            (when (member character seen-flags) (fail "Duplicate inline flag"))
-            (push character seen-flags)
-            (setf *regex-flags* (update-parser-flag *regex-flags* character enabled-p))
-            (setf seen-p t))))
-    (unless seen-p (fail "Expected inline flags"))))
+  (let ((enabled-p t)
+        (seen-p nil)
+        (disabled-p nil)
+        (seen-flags nil))
+    (loop while (and
+        (peek-type :char)
+        (or
+          (member (peek-value) '(#\i #\m #\s #\R #\U #\x #\u))
+          (char= (peek-value) #\-)))
+          do (if (char= (peek-value) #\-) (progn
+          (when disabled-p
+            (fail "Inline flags may contain only one -"))
+          (take-token)
+          (setf enabled-p nil
+                disabled-p t))
+        (let ((character (token-value (take-token))))
+          (when (member character seen-flags)
+            (fail "Duplicate inline flag"))
+          (push character seen-flags)
+          (setf *regex-flags* (update-parser-flag *regex-flags* character enabled-p))
+          (setf seen-p t))))
+    (unless seen-p
+      (fail "Expected inline flags"))))
 
 (defun parse-group ()
   (take-token)
   (with-parser-nesting
-      (*regex-nesting-depth* *regex-nest-limit*
-       (fail "Regular expression exceeds the configured nesting limit"))
+    (*regex-nesting-depth*
+      *regex-nest-limit*
+      (fail "Regular expression exceeds the configured nesting limit"))
     (block parse-group
-      (let ((capture-index nil) (name nil) (capturing-p (not *regex-never-capture-p*)) (scoped-flags-p nil))
+      (let ((capture-index nil)
+            (name nil)
+            (capturing-p (not *regex-never-capture-p*))
+            (scoped-flags-p nil))
         (when (peek-type :question)
           (take-token)
-          (if (and (peek-type :char) (member (peek-value) '(#\: #\< #\P)))
-              (case (peek-value)
-                (#\: (take-token) (setf capturing-p nil))
-                (#\< (take-token) (setf name (read-group-name) capturing-p t))
-                (#\P (take-token)
-                     (unless (and (peek-type :char) (char= (peek-value) #\<))
-                       (fail "Expected < after ?P"))
-                     (take-token)
-                     (setf name (read-group-name) capturing-p t)))
-              (let ((saved-flags *regex-flags*))
-                (parse-flags)
-                (cond
-                  ((peek-type :rparen) (take-token) (return-from parse-group (make-concat nil)))
-                  ((and (peek-type :char) (char= (peek-value) #\:))
-                   (take-token)
-                   (setf capturing-p nil scoped-flags-p saved-flags))
-                  (t (fail "Expected : or ) after inline flags"))))))
-        (when capturing-p (setf capture-index (incf *regex-group-count*)))
+          (if (and (peek-type :char) (member (peek-value) '(#\: #\< #\P))) (case (peek-value)
+              (#\:
+                (take-token)
+                (setf capturing-p nil))
+              (#\<
+                (take-token)
+                (setf name (read-group-name)
+                      capturing-p t))
+              (#\P
+                (take-token)
+                (unless (and (peek-type :char) (char= (peek-value) #\<))
+                  (fail "Expected < after ?P"))
+                (take-token)
+                (setf name (read-group-name)
+                      capturing-p t)))
+            (let ((saved-flags *regex-flags*))
+              (parse-flags)
+              (cond
+                ((peek-type :rparen)
+                  (take-token)
+                  (return-from parse-group (make-concat nil)))
+                ((and (peek-type :char) (char= (peek-value) #\:))
+                  (take-token)
+                  (setf capturing-p nil
+                        scoped-flags-p saved-flags))
+                (t (fail "Expected : or ) after inline flags"))))))
+        (when capturing-p
+          (setf capture-index (incf *regex-group-count*)))
         (let ((child (parse-alternation)))
-          (unless (peek-type :rparen) (fail "Unclosed group"))
+          (unless (peek-type :rparen)
+            (fail "Unclosed group"))
           (take-token)
-          (when scoped-flags-p (setf *regex-flags* scoped-flags-p))
+          (when scoped-flags-p
+            (setf *regex-flags* scoped-flags-p))
           (make-instance 'group-node :child child :capture-index capture-index :name name))))))
 
 (defun parse-atom ()
-  (when (at-end-p) (fail "Expected an expression"))
+  (when (at-end-p)
+    (fail "Expected an expression"))
   (let ((token (peek-token)))
     (case (token-type token)
       (:lparen (parse-group))
       (:lbracket (parse-class))
-      (:dot (take-token) (make-instance 'any-char-node :dotall-p (flag-p +flag-dotall+)
-                                        :crlf-p (flag-p +flag-crlf+)
-                                        :line-terminator *regex-line-terminator*
-                                        :unicode-p (flag-p +flag-unicode+)))
-      (:caret (take-token) (make-instance 'anchor-node :kind :start
-                                          :multiline-p (flag-p +flag-multiline+)
-                                          :crlf-p (flag-p +flag-crlf+)
-                                          :line-terminator *regex-line-terminator*))
-      (:dollar (take-token) (make-instance 'anchor-node :kind :end
-                                           :multiline-p (flag-p +flag-multiline+)
-                                           :crlf-p (flag-p +flag-crlf+)
-                                           :line-terminator *regex-line-terminator*))
-      (:escape (take-token) (build-escape-atom token))
-      (:hex-brace-open (take-token) (make-literal (collect-braced-hex)))
-      ((:star :plus :question :rbrace :pipe :rparen) (fail "Unexpected metacharacter"))
-      (otherwise (take-token) (make-literal (token-value token))))))
+      (:dot
+        (take-token)
+        (make-instance
+          'any-char-node
+          :dotall-p
+          (flag-p +flag-dotall+)
+          :crlf-p
+          (flag-p +flag-crlf+)
+          :line-terminator
+          *regex-line-terminator*
+          :unicode-p
+          (flag-p +flag-unicode+)))
+      (:caret
+        (take-token)
+        (make-instance
+          'anchor-node
+          :kind
+          :start
+          :multiline-p
+          (flag-p +flag-multiline+)
+          :crlf-p
+          (flag-p +flag-crlf+)
+          :line-terminator
+          *regex-line-terminator*))
+      (:dollar
+        (take-token)
+        (make-instance
+          'anchor-node
+          :kind
+          :end
+          :multiline-p
+          (flag-p +flag-multiline+)
+          :crlf-p
+          (flag-p +flag-crlf+)
+          :line-terminator
+          *regex-line-terminator*))
+      (:escape
+        (take-token)
+        (build-escape-atom token))
+      (:hex-brace-open
+        (take-token)
+        (make-literal (collect-braced-hex)))
+      ((:star :plus :question :rbrace :pipe :rparen)
+        (fail "Unexpected metacharacter"))
+      (otherwise
+        (take-token)
+        (make-literal (token-value token))))))
 
-(defun word-anchor (kind) (make-instance 'anchor-node :kind kind :unicode-p (flag-p +flag-unicode+)))
+(defun word-anchor (kind)
+  (make-instance 'anchor-node :kind kind :unicode-p (flag-p +flag-unicode+)))
 
 (defun closing-brace-p (token)
   "Whether TOKEN is a `}` -- :RBRACE outside a character class, or a plain
@@ -243,23 +209,27 @@ name is not an error: `\\b{2}` is a repeated bare word-boundary, so a `{`
 with no alphabetic-or-hyphen name behind it must be left completely
 unconsumed for the quantifier grammar to see -- simply not taking the
 :LBRACE token accomplishes exactly that, with no position to rewind."
-  (if (not (peek-type :lbrace))
-      :word-boundary
-      (let ((saved *regex-token-position*) (name-characters nil))
-        (take-token)
-        (loop while (and (peek-type :char)
-                          (or (ascii-alphabetic-p (peek-value)) (char= (peek-value) #\-)))
-              do (push (token-value (take-token)) name-characters))
-        (if (null name-characters)
-            (progn (setf *regex-token-position* saved) :word-boundary)
-            (let ((name (coerce (nreverse name-characters) 'string)))
-              (unless (closing-brace-p (peek-token)) (fail "Unclosed word boundary"))
-              (take-token)
-              (cond ((string= name "start") :word-start)
-                    ((string= name "end") :word-end)
-                    ((string= name "start-half") :word-start-half)
-                    ((string= name "end-half") :word-end-half)
-                    (t (fail "Unknown word boundary"))))))))
+  (if (not (peek-type :lbrace)) :word-boundary
+    (let ((saved *regex-token-position*)
+          (name-characters nil))
+      (take-token)
+      (loop while (and
+          (peek-type :char)
+          (or (ascii-alphabetic-p (peek-value)) (char= (peek-value) #\-)))
+            do (push (token-value (take-token)) name-characters))
+      (if (null name-characters) (progn
+          (setf *regex-token-position* saved)
+          :word-boundary)
+        (let ((name (coerce (nreverse name-characters) 'string)))
+          (unless (closing-brace-p (peek-token))
+            (fail "Unclosed word boundary"))
+          (take-token)
+          (cond
+            ((string= name "start") :word-start)
+            ((string= name "end") :word-end)
+            ((string= name "start-half") :word-start-half)
+            ((string= name "end-half") :word-end-half)
+            (t (fail "Unknown word boundary"))))))))
 
 (defun collect-braced-hex ()
   "Collect the hex digits of a `\\x{...}`/`\\u{...}`/`\\U{...}` escape after
@@ -268,16 +238,18 @@ token cursor as everywhere else in this grammar -- unlike the tokenizer,
 which cannot evaluate the live extended flag, this runs at grammar time, so
 `(?x)\\x{ 6 1 }` collects \"61\" exactly as the original character-level
 parser's PARSE-BRACED-HEX-CODE (built on the same PEEK-based skipping) did."
-  (let ((beginning (current-source-position)) (digits nil))
+  (let ((beginning (current-source-position))
+        (digits nil))
     (loop while (and (peek-type :char) (digit-char-p (peek-value) 16))
           do (push (token-value (take-token)) digits))
-    (when (null digits) (fail "Expected hexadecimal escape digits" beginning))
-    (unless (closing-brace-p (peek-token)) (fail "Unclosed Unicode escape" beginning))
+    (when (null digits)
+      (fail "Expected hexadecimal escape digits" beginning))
+    (unless (closing-brace-p (peek-token))
+      (fail "Unclosed Unicode escape" beginning))
     (take-token)
     (let ((code (parse-integer (coerce (nreverse digits) 'string) :radix 16)))
-      (if (and (< code char-code-limit) (not (<= #xD800 code #xDFFF)))
-          (code-char code)
-          (fail "Unicode escape is not a Unicode scalar value" beginning)))))
+      (if (and (< code char-code-limit) (not (<= #xD800 code #xDFFF))) (code-char code)
+        (fail "Unicode escape is not a Unicode scalar value" beginning)))))
 
 (defun build-escape-atom (token)
   (let ((escape (token-value token)))
@@ -300,7 +272,7 @@ parser's PARSE-BRACED-HEX-CODE (built on the same PEEK-based skipping) did."
        ;; flag), so tokenization would already have failed for an unknown
        ;; name -- nothing to re-check here.
        (make-class nil (not (eq (getf escape :from-p) (getf escape :negated-p)))
-                   (list :property (getf escape :name))))
+                   (list :property (getf escape :descriptor))))
       (:quoted-literal (make-concat (map 'list (lambda (c) (make-literal c)) (getf escape :text))))
       (:control (make-literal (getf escape :char)))
       (:hex (make-literal (getf escape :char)
@@ -311,29 +283,59 @@ parser's PARSE-BRACED-HEX-CODE (built on the same PEEK-based skipping) did."
       (:literal (make-literal (getf escape :char))))))
 
 (defun parse-quantifier (node)
-  (let ((minimum nil) (maximum nil) (quantified-p nil))
+  (let ((minimum nil)
+        (maximum nil)
+        (quantified-p nil))
     (case (peek-type)
-      (:star (take-token) (setf minimum 0 maximum nil quantified-p t))
-      (:plus (take-token) (setf minimum 1 maximum nil quantified-p t))
-      (:question (take-token) (setf minimum 0 maximum 1 quantified-p t))
+      (:star
+        (take-token)
+        (setf minimum 0
+              maximum nil
+              quantified-p t))
+      (:plus
+        (take-token)
+        (setf minimum 1
+              maximum nil
+              quantified-p t))
+      (:question
+        (take-token)
+        (setf minimum 0
+              maximum 1
+              quantified-p t))
       (:lbrace
-       (take-token)
-       (setf minimum (parse-number) maximum minimum quantified-p t)
-       (cond
-         ((peek-type :comma)
+        (take-token)
+        (setf minimum (parse-number)
+              maximum minimum
+              quantified-p t)
+        (cond
+          ((peek-type :comma)
+            (take-token)
+            (setf maximum (unless (peek-type :rbrace)
+                (parse-number))))
+          ((peek-type :rbrace) nil)
+          (t (fail "Expected , or } in repetition")))
+        (unless (peek-type :rbrace)
+          (fail "Unclosed repetition"))
+        (take-token)
+        (when (and maximum (> minimum maximum))
+          (fail "Repetition minimum exceeds maximum"))))
+    (if quantified-p (let ((greedy-p (not (flag-p +flag-ungreedy+))))
+        (when (peek-type :question)
           (take-token)
-          (setf maximum (unless (peek-type :rbrace) (parse-number))))
-         ((peek-type :rbrace) nil)
-         (t (fail "Expected , or } in repetition")))
-       (unless (peek-type :rbrace) (fail "Unclosed repetition"))
-       (take-token)
-       (when (and maximum (> minimum maximum)) (fail "Repetition minimum exceeds maximum"))))
-    (if quantified-p
-        (let ((greedy-p (not (flag-p +flag-ungreedy+))))
-          (when (peek-type :question) (take-token) (setf greedy-p (not greedy-p)))
-          (when (member (peek-type) '(:star :plus :question :lbrace)) (fail "Repeated repetition operator"))
-          (make-instance 'repetition-node :child node :min minimum :max maximum :greedy-p greedy-p))
-        node)))
+          (setf greedy-p (not greedy-p)))
+        (when (member (peek-type) '(:star :plus :question :lbrace))
+          (fail "Repeated repetition operator"))
+        (make-instance
+          'repetition-node
+          :child
+          node
+          :min
+          minimum
+          :max
+          maximum
+          :greedy-p
+          greedy-p))
+      node)))
 
 (defun parse-concatenation ()
   (let ((children nil))
@@ -343,17 +345,20 @@ parser's PARSE-BRACED-HEX-CODE (built on the same PEEK-based skipping) did."
 
 (defun parse-alternation ()
   (let ((branches (list (parse-concatenation))))
-    (loop while (peek-type :pipe) do (take-token) (push (parse-concatenation) branches))
+    (loop while (peek-type :pipe)
+          do (take-token) (push (parse-concatenation) branches))
     (if (null (cdr branches)) (car branches)
-        (make-instance 'alternation-node :branches (nreverse branches)))))
+      (make-instance 'alternation-node :branches (nreverse branches)))))
 
-(defun parse-regex (pattern &key (initial-flags +flag-unicode+)
-                                  byte-mode
-                                  literal
-                                  never-capture
-                                  (octal t)
-                                  (nest-limit +default-nest-limit+)
-                                  (line-terminator #\Newline))
+(defun parse-regex (pattern
+    &key
+    (initial-flags +flag-unicode+)
+    byte-mode
+    literal
+    never-capture
+    (octal t)
+    (nest-limit +default-nest-limit+)
+    (line-terminator #\Newline))
   "Parse PATTERN into a REGEX-NODE tree.
 Signals REGEX-SYNTAX-ERROR on malformed input."
   (unless (stringp pattern)
@@ -378,9 +383,13 @@ Signals REGEX-SYNTAX-ERROR on malformed input."
          (*regex-never-capture-p* never-capture)
          (*regex-nest-limit* nest-limit)
          (*regex-line-terminator* line-terminator))
-    (let ((ast (if literal
-                   (prog1 (make-concat (loop for character across pattern collect (make-literal character)))
-                     (setf *regex-token-position* (length *regex-tokens*)))
-                   (parse-alternation))))
-      (unless (at-end-p) (fail "Unexpected trailing input"))
+    (let ((ast
+          (if literal (prog1
+              (make-concat
+                (loop for character across pattern
+                      collect (make-literal character)))
+              (setf *regex-token-position* (length *regex-tokens*)))
+            (parse-alternation))))
+      (unless (at-end-p)
+        (fail "Unexpected trailing input"))
       ast)))

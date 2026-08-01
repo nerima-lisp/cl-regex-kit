@@ -6,7 +6,7 @@ Cox documents in
 and its sequels, and the one RE2 and Rust's `regex` crate ship in production.
 
 ```text
-pattern string --[regex-tokenizer.lisp]--> token vector --[regex-grammar.lisp]--> REGEX-NODE tree --[nfa.lisp]--> INST program --[pike-vm.lisp]--> MATCH-RESULT
+pattern string --[regex-tokenizer.lisp]--> token vector --[regex-grammar.lisp]--> REGEX-NODE tree --[nfa.lisp]--> INST program --[pike-vm-*.lisp]--> MATCH-RESULT
 ```
 
 ## 1. Parsing (`src/regex-tokenizer.lisp`, `src/regex-grammar.lisp`, `src/ast.lisp`)
@@ -30,7 +30,7 @@ stays linear in pattern size.
 `:split` takes two targets and tries the first before the second, which is how
 greedy-vs-lazy repetition and leftmost alternation encode their priority.
 
-## 3. Pike's VM (`src/pike-vm.lisp`)
+## 3. Pike's VM (`src/pike-vm-instructions.lisp`, `src/pike-vm-closure.lisp`, `src/pike-vm-capture.lisp`, `src/pike-vm-set.lisp`)
 
 `run-pike-vm` executes the program against the input **without ever
 backtracking**. Instead of following one path at a time and retrying on

@@ -116,19 +116,25 @@
   (let ((regex (compile-regex "[[a]&&[]]")))
     (expect (is-match-p regex "a") :to-be-falsy)))
 
-(it "validates capture-name characters and initial parser options"
-  (expect (cl-regex-kit::capture-name-start-p #\a) :to-be-truthy)
-  (expect (cl-regex-kit::capture-name-start-p #\_) :to-be-truthy)
-  (expect (cl-regex-kit::capture-name-start-p #\1) :to-be-falsy)
-  (expect (cl-regex-kit::capture-name-character-p #\1) :to-be-truthy)
-  (expect (cl-regex-kit::capture-name-character-p #\.) :to-be-truthy)
-  (expect (cl-regex-kit::capture-name-character-p #\-) :to-be-falsy)
+(it "validates capture-name characters and parser flags"
+  (expect (cl-regex-kit::capture-name-start-p #\\a) :to-be-truthy)
+  (expect (cl-regex-kit::capture-name-start-p #\\_) :to-be-truthy)
+  (expect (cl-regex-kit::capture-name-start-p #\\1) :to-be-falsy)
+  (expect (cl-regex-kit::capture-name-character-p #\\1) :to-be-truthy)
+  (expect (cl-regex-kit::capture-name-character-p (code-char #x00b2)) :to-be-truthy)
+  (expect (cl-regex-kit::capture-name-character-p #\\.) :to-be-truthy)
+  (expect (cl-regex-kit::capture-name-character-p #\\-) :to-be-falsy)
+  (expect (cl-regex-kit::id-start-p #\\A) :to-be-truthy)
+  (expect (cl-regex-kit::id-continue-p #\\1) :to-be-truthy)
   (expect (logtest cl-regex-kit::+flag-case-insensitive+
                    (cl-regex-kit::make-parser-flags :case-insensitive t))
           :to-be-truthy)
   (expect (logtest cl-regex-kit::+flag-crlf+
                    (cl-regex-kit::make-parser-flags :crlf t))
-          :to-be-truthy))
+          :to-be-truthy)
+  (signals error
+    (cl-regex-kit::required-unicode-runtime-property-values
+      :category (quote ("DEFINITELYUNKNOWNCATEGORY")))))
 
 (it "maps every compilation option to an independent parser flag"
   (let ((flags (cl-regex-kit::make-parser-flags

@@ -1,0 +1,103 @@
+(in-package #:cl-regex-kit)
+
+(defstruct match-result start
+  end
+  groups
+  group-names)
+
+(defun slot-count-for-program (program)
+  (loop for instruction across program
+        when (eq (inst-op instruction) :save)
+          maximize (1+ (inst-a instruction)) into maximum
+        finally (return (or maximum 0))))
+
+(defun make-match-result-from-slots (slots slot-count)
+  (let ((groups (make-array (/ slot-count 2) :initial-element nil)))
+    (dotimes (index (length groups))
+      (let ((from (aref slots (* 2 index)))
+            (to (aref slots (1+ (* 2 index)))))
+        (when (and from to)
+          (setf (aref groups index) (cons from to)))))
+    (make-match-result :start (aref slots 0) :end (aref slots 1) :groups groups)))
+
+(defun run-pike-vm (program text &key (start 0) end shortest-p longest-p never-newline-p)
+  "Run PROGRAM against TEXT and return its leftmost-first match, if any.
+
+When SHORTEST-P is true, select the earliest ending match at the leftmost
+start position instead of applying the usual greedy/lazy branch priority.
+When LONGEST-P is true, select the longest match at the leftmost start
+position, retaining the usual branch priority to resolve equal-length paths."
+  (when (and shortest-p longest-p)
+    (error "SHORTEST-P and LONGEST-P cannot both be true"))
+  (check-type never-newline-p boolean)
+  (let* ((slot-count (slot-count-for-program program))
+         (length (length text))
+         (limit (or end length))
+         (byte-mode-p (not (stringp text)))
+         (workspace (make-pike-vm-closure-workspace (length program))))
+    (unless (and (integerp start) (integerp limit) (<= 0 start limit length))
+      (error "START and END must define a range within TEXT"))
+    (flet ((closure (seeds position)
+             (pike-vm-closure
+            program
+            text
+            position
+            length
+            byte-mode-p
+            seeds
+            :workspace
+            workspace)))
+      (let ((pending (make-array (1+ (- limit start)) :initial-element nil))
+            (best-result nil))
+        (loop for position from start to limit
+              do (let* ((pending-index (- position start))
+                 (seeds
+                (prog1
+                  (nreverse (aref pending pending-index))
+                  (setf (aref pending pending-index) nil)))
+                 (fresh-seed
+                (unless (and longest-p best-result)
+                  (make-vm-thread :pc 0 :slots (make-array slot-count :initial-element nil))))
+                 (current
+                (closure
+                  (if fresh-seed (nconc seeds (list fresh-seed))
+                    seeds)
+                  position))
+                 (blocking-p nil)
+                 (earliest-start
+                (and
+                  shortest-p
+                  (loop for thread in current
+                        minimize (aref (vm-thread-slots thread) 0)))))
+            (dolist (thread current)
+              (let ((instruction (aref program (vm-thread-pc thread))))
+                (case (inst-op instruction)
+                  (:match
+                    (let ((slots (vm-thread-slots thread)))
+                      (cond
+                        (longest-p
+                          (when (or
+                              (null best-result)
+                              (< (aref slots 0) (match-result-start best-result))
+                              (and
+                                (= (aref slots 0) (match-result-start best-result))
+                                (> (aref slots 1) (match-result-end best-result))))
+                            (setf best-result (make-match-result-from-slots slots slot-count))))
+                        ((if shortest-p (= (aref slots 0) earliest-start)
+                            (not blocking-p))
+                          (return-from run-pike-vm (make-match-result-from-slots slots slot-count))))))
+                  ((:char :class :any)
+                    (multiple-value-bind (next-position matched-p) (instruction-match-end
+                        instruction
+                        text
+                        position
+                        limit
+                        byte-mode-p
+                        never-newline-p)
+                      (when matched-p
+                        (setf blocking-p t)
+                        (push
+                          (make-vm-thread :pc (inst-b instruction) :slots (vm-thread-slots thread))
+                          (aref pending (- next-position start)))))))))
+            finally
+            (return best-result)))))))
