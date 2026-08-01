@@ -7,6 +7,11 @@ edit_uri: edit/main/docs/src/
 
 docs_dir: src
 
+# Also passed as --strict by packages.docs. Writing it here as well means
+# `mkdocs serve` applies the same gate, so no invocation path silently
+# tolerates a broken link. Use `mkdocs serve --no-strict` while editing.
+strict: true
+
 theme:
   name: material
   features:
@@ -41,15 +46,20 @@ markdown_extensions:
       alternate_style: true
 
 # Every page under docs/src/ must appear here: --strict fails the build on an
-# unlisted page.
+# unlisted page. docs/src/ is split into guide/ reference/ project/, with only
+# index.md, getting-started.md and assets/ at the root, per the 2026-08-01
+# revision of DOCS_STANDARD.md.
 nav:
   - Home: index.md
   - Getting started: getting-started.md
   - Guide:
-      - Core concepts: concepts.md
+      - Core concepts: guide/concepts.md
   - Reference:
-      - API: api-reference.md
-      - Architecture: architecture.md
-      - Compatibility: compatibility.md
+      - API: reference/api.md
+      - Architecture: reference/architecture.md
+      - Compatibility: reference/compatibility.md
   - Project:
-      - Roadmap: roadmap.md
+      - Roadmap: project/roadmap.md
+
+not_in_nav: |
+  notes/

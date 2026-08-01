@@ -192,4 +192,4 @@ alias `Age=v151` are supported. Age uses the same static Unicode 16 range data a
   work bounded by the product of text length and total member-program size;
   this is not a DFA-based RE2 `Set` implementation.
 
-See the [Roadmap](roadmap.md) for planned extensions.
+See the [Roadmap](../project/roadmap.md) for planned extensions.

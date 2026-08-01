@@ -71,6 +71,6 @@ merged away. The thread-set simulation above never repeats work, so matching
 time is `O(pattern-size * input-size)` regardless of the input.
 
 The trade is expressiveness: [backreferences and unbounded
-lookaround](compatibility.md) require matching against runtime-captured text
+lookaround](../reference/compatibility.md) require matching against runtime-captured text
 or unbounded lookahead, which a finite automaton cannot represent without
 giving up the linear-time guarantee. `cl-regex-kit` chooses the guarantee.

@@ -33,7 +33,7 @@ non-overlapping results while safely advancing through zero-length matches.
 
 ## Explicit non-goals
 
-See [Compatibility](compatibility.md): backreferences and lookaround
+See [Compatibility](../reference/compatibility.md): backreferences and lookaround
 are not planned, by design.
 
 ## Future extensions

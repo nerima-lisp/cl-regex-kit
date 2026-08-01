@@ -43,7 +43,7 @@ needs [cl-weave](https://github.com/nerima-lisp/cl-weave).
     The public API supports literals, alternation, named groups, greedy and lazy
     repetition, character classes, escapes, inline flags, and line, absolute,
     and word-boundary anchors.
-    See the [Roadmap](roadmap.md) for the exact scope and intentional
+    See the [Roadmap](project/roadmap.md) for the exact scope and intentional
     exclusions.
 
 ## Reading a match

@@ -11,8 +11,8 @@ Everything is portable Common Lisp with no runtime dependencies; only the test
 system uses [cl-weave](https://github.com/nerima-lisp/cl-weave).
 
 Start with [Getting started](getting-started.md), then read [Core
-concepts](concepts.md) for the parser -> NFA -> Pike's VM pipeline and
-[Compatibility](compatibility.md) for what this engine deliberately does not
+concepts](guide/concepts.md) for the parser -> NFA -> Pike's VM pipeline and
+[Compatibility](reference/compatibility.md) for what this engine deliberately does not
 support.
 
 <div class="grid cards" markdown>
@@ -31,7 +31,7 @@ support.
 
     Why an NFA simulation instead of backtracking, and how captures survive it.
 
-    [:octicons-arrow-right-24: Core concepts](concepts.md)
+    [:octicons-arrow-right-24: Core concepts](guide/concepts.md)
 
 -   :material-format-list-bulleted: **Look something up**
 
@@ -39,7 +39,7 @@ support.
 
     Every exported symbol with its signature and return values.
 
-    [:octicons-arrow-right-24: API Reference](api-reference.md)
+    [:octicons-arrow-right-24: API Reference](reference/api.md)
 
 -   :material-alert-circle-outline: **Check compatibility**
 
@@ -47,7 +47,7 @@ support.
 
     What a finite automaton cannot express, and why that's a deliberate trade.
 
-    [:octicons-arrow-right-24: Compatibility](compatibility.md)
+    [:octicons-arrow-right-24: Compatibility](reference/compatibility.md)
 
 </div>
 
@@ -73,5 +73,5 @@ of a smaller feature set -- no backreferences, no lookaround.
   the simulation instead of requiring a return to backtracking.
 - **A deliberately smaller feature set.** Backreferences and lookaround are
   out of scope from the start -- see
-  [Compatibility](compatibility.md) -- because retrofitting them later would
+  [Compatibility](reference/compatibility.md) -- because retrofitting them later would
   mean reintroducing the exponential blowup the whole design avoids.

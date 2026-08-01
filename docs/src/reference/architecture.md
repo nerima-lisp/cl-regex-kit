@@ -72,7 +72,7 @@ operations and makes the ASDF serial order the dependency order.
 
 ## Data flow
 
-See [Core concepts](concepts.md) for the full explanation of each stage. In
+See [Core concepts](../guide/concepts.md) for the full explanation of each stage. In
 one line: `parser-syntax.lisp`, `regex-tokenizer*.lisp`,
 `regex-grammar*.lisp`, and `nfa.lisp` are pure compilation (pattern in,
 program out, or a `regex-syntax-error`); `parser-syntax.lisp` owns
