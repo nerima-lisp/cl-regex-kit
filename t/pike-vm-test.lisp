@@ -84,7 +84,10 @@
         (cl-regex-kit::run-pike-vm-set program 2 "cat" :matches matches)
         :to-be
         matches)
-      (expect (coerce matches (quote list)) :to-equal (quote (1 0)))))
+      (expect (coerce matches (quote list)) :to-equal (quote (1 0))))
+    (expect (cl-regex-kit::run-pike-vm-set program 2 "cat")
+            :to-equal
+            (quote (0))))
   (let* ((set (compile-regex-set (quote ("a+" "a" "a+"))))
          (program (cl-regex-kit::regex-set-program set))
          (workspace (cl-regex-kit::make-pike-vm-closure-workspace (length program)))

@@ -17,7 +17,7 @@
           ("\\b{") ("\\b{middle}") ("\\b{start") ("[[:]]") ("[[:unknown:]]")
           ("[a-\\d]") ("[a") ("[") ("[a&&]") ("(?Pname)") ("(?q)a")
           ("(?i?a)") ("(?ii)a") ("(?i-i)a") ("(?i--m)a")
-          ("a{") ("a{1") ("a{1,0}") ("a{1001}") ("a**"))
+          ("a{") ("a{1") ("a{1,2") ("a{1,0}") ("a{1001}") ("a**") ("("))
     "rejects the malformed pattern ~S with regex-syntax-error"
     (pattern)
   (signals regex-syntax-error (cl-regex-kit::parse-regex pattern)))
@@ -114,6 +114,34 @@
       (expect a :to-match-regex regex)))
   (let ((regex (compile-regex "[[a]&&[]]")))
     (expect-not "a" :to-match-regex regex)))
+
+(it "flushes accumulated literal ranges before a later class-item kind"
+  (let ((regex (compile-regex "[a[:digit:]]")))
+    (expect "a" :to-match-regex regex)
+    (expect "5" :to-match-regex regex)
+    (expect-not "b" :to-match-regex regex))
+  (let ((regex (compile-regex "[a\\d]")))
+    (expect "a" :to-match-regex regex)
+    (expect "5" :to-match-regex regex)
+    (expect-not "b" :to-match-regex regex)))
+
+(it "negates a Unicode property escape inside a character class"
+  (let ((regex (compile-regex "[\\P{Lu}]")))
+    (expect "a" :to-match-regex regex)
+    (expect-not "A" :to-match-regex regex)))
+
+(it "treats non-boundary escapes as literals inside a character class"
+  (dolist (pattern '("[\\B]" "[\\C]" "[\\Q]"))
+    (let ((regex (compile-regex pattern)))
+      (expect (subseq pattern 2 3) :to-match-regex regex))))
+
+(it "matches a lowercase byte against an uppercase-only case-insensitive class"
+  (let ((regex (compile-byte-regex "(?i-u:[A-Z])")))
+    (expect (make-array 1 :element-type '(unsigned-byte 8) :initial-contents '(#x61))
+            :to-match-regex regex)))
+
+(it "prefers the empty match for a lazy optional quantifier"
+  (expect (match-string (match "a??" "a") "a") :to-equal ""))
 
 (it "validates capture-name characters and parser flags"
   (expect (cl-regex-kit::capture-name-start-p #\a) :to-be-truthy)

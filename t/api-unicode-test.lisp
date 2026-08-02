@@ -378,6 +378,17 @@
                 character)))
           :to-equal
           expected)))))
+
+(it
+  "resolves properties that fall outside SBCL's own grapheme-break classification"
+  (expect (string (code-char #x09be)) :to-match-regex (compile-regex "\\p{Grapheme_Extend}")))
+
+(it
+  "matches noncharacter code points via the fast >= #xfffe range"
+  (expect-not "a" :to-match-regex (compile-regex "\\p{NChar}"))
+  (expect (string (code-char #xfffe)) :to-match-regex (compile-regex "\\p{NChar}"))
+  (expect-not (string (code-char #xfffd)) :to-match-regex (compile-regex "\\p{NChar}")))
+
 (it
   "matches packed Unicode ranges at binary-search boundaries"
   (labels ((matches-p (packed code)

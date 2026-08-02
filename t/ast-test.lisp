@@ -73,7 +73,13 @@
             :to-equal '(nil nil))
       (expect (count-of (make-instance 'cl-regex-kit::repetition-node
                                        :child (capture) :min 2 :max 2))
-              :to-equal '(1 t))))
+              :to-equal '(1 t))
+    (expect (count-of (make-instance 'cl-regex-kit::alternation-node
+                                     :branches (list (make-instance 'cl-regex-kit::alternation-node
+                                                                    :branches (list (capture)
+                                                                                   (make-instance 'cl-regex-kit::literal-node :char #\a)))
+                                                    (capture))))
+            :to-equal '(nil nil))))
 
 (it "encodes every UTF-8 scalar width and only rebuilds changed containers"
   (flet ((literal (character &key (unicode-p nil))
