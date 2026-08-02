@@ -14,27 +14,31 @@
 (it
   "matches octet vectors through the one-shot byte API"
   (flet ((octets (&rest values)
-           (make-array (length values)
-                       :element-type '(unsigned-byte 8)
-                       :initial-contents values)))
+           (make-array
+          (length values)
+          :element-type
+          '(unsigned-byte 8)
+          :initial-contents
+          values)))
     (let ((text (octets #xff #x41 #x42 #x80)))
       (let ((result (byte-match "(?-u:\\x41\\x42)" text :start 1 :end 3)))
         (expect (match-start result) :to-equal 1)
         (expect (match-end result) :to-equal 3)
-        (expect (coerce (match-string result text) 'list)
-                :to-equal '(65 66)))
-      (expect (byte-match "(?-u:\\x41\\x42)" text :start 2)
-              :to-be-null))))
+        (expect (coerce (match-string result text) 'list) :to-equal '(65 66)))
+      (expect (byte-match "(?-u:\\x41\\x42)" text :start 2) :to-be-null))))
 
-(it "escapes arbitrary text using Rust-compatible meta-character quoting"
-  (let ((literal (concatenate 'string ".+?()|[]{}^$\\#&-~ "
-                              (string #\Tab)
-                              (string #\Newline))))
-    (expect (escape literal)
-            :to-equal
-            (concatenate 'string "\\.\\+\\?\\(\\)\\|\\[\\]\\{\\}\\^\\$\\\\\\#\\&\\-\\~ "
-                         (string #\Tab)
-                         (string #\Newline)))
+(it
+  "escapes arbitrary text using Rust-compatible meta-character quoting"
+  (let ((literal
+        (concatenate 'string ".+?()|[]{}^$\\#&-~ " (string #\Tab) (string #\Newline))))
+    (expect
+      (escape literal)
+      :to-equal
+      (concatenate
+        'string
+        "\\.\\+\\?\\(\\)\\|\\[\\]\\{\\}\\^\\$\\\\\\#\\&\\-\\~ "
+        (string #\Tab)
+        (string #\Newline)))
     (expect
       (match-string (match (escape literal) literal) literal)
       :to-equal
@@ -89,12 +93,12 @@
     (expect (match-start (captures regex text)) :to-equal 1)
     (expect (shortest-match regex text) :to-equal 2)
     (expect (match-start (longest-match regex text)) :to-equal 1)
-    (expect (is-match-p regex text) :to-be-truthy)
+    (expect text :to-match-regex regex)
     (expect (match-start (match "a+" text)) :to-equal 1)
     (expect (match-string (full-match regex "aa") "aa") :to-equal "aa"))
   (let* ((regex (compile-byte-regex "(?-u:a+)"))
-         (text (make-array 3 :element-type '(unsigned-byte 8)
-                            :initial-contents '(122 97 97))))
+         (text
+        (make-array 3 :element-type '(unsigned-byte 8) :initial-contents '(122 97 97))))
     (expect (match-start (byte-match "(?-u:a+)" text)) :to-equal 1)
     (expect (match-start (scan regex text)) :to-equal 1)))
 
@@ -103,8 +107,10 @@
   (let* ((regex (compile-regex "(?<word>[a-z]+)-(?<number>[0-9]+)"))
          (text "--item-42 next"))
     (let ((result (captures regex text)))
-      (expect (coerce (match-captures result text) 'list)
-              :to-equal '("item-42" "item" "42"))
+      (expect
+        (coerce (match-captures result text) 'list)
+        :to-equal
+        '("item-42" "item" "42"))
       (expect (match-group-string result "number" text) :to-equal "42"))
     (let ((result (captures-at regex text 3 :end 10)))
       (expect (match-start result) :to-equal 3)
@@ -120,27 +126,32 @@
     (signals type-error (scan-at regex text -1))
     (signals type-error (is-match-at regex text -1)))
   (flet ((octets (&rest values)
-           (make-array (length values)
-                       :element-type '(unsigned-byte 8)
-                       :initial-contents values)))
+           (make-array
+          (length values)
+          :element-type
+          '(unsigned-byte 8)
+          :initial-contents
+          values)))
     (let* ((regex (compile-byte-regex "(?-u:(A)(B))"))
            (text (octets #xff 65 66 #x80))
            (result (captures-at regex text 1)))
       (expect (is-match-at regex text 1) :to-be-truthy)
-      (expect (mapcar (lambda (capture) (coerce capture 'list))
-                      (coerce (match-captures result text) 'list))
-              :to-equal '((65 66) (65) (66))))))
+      (expect
+        (mapcar
+          (lambda (capture)
+            (coerce capture 'list))
+          (coerce (match-captures result text) 'list))
+        :to-equal
+        '((65 66) (65) (66))))))
 
 (it
   "reuses capture locations without retaining stale captures"
   (let* ((regex (compile-regex "(?<word>[a-z]+)(?:-(?<number>\\d+))?"))
          (locations (regex-capture-locations regex)))
-    (multiple-value-bind (start end)
-        (scan-captures-into regex locations "--item-42")
+    (multiple-value-bind (start end) (scan-captures-into regex locations "--item-42")
       (expect start :to-equal 2)
       (expect end :to-equal 9))
-    (multiple-value-bind (start end)
-        (scan-captures-into-at regex locations "--item-42" 2 :end 9)
+    (multiple-value-bind (start end) (scan-captures-into-at regex locations "--item-42" 2 :end 9)
       (expect start :to-equal 2)
       (expect end :to-equal 9))
     (expect (capture-locations-count locations) :to-equal 3)
@@ -150,8 +161,7 @@
     (expect (capture-location-end locations 1) :to-equal 6)
     (expect (capture-location-start locations 2) :to-equal 7)
     (expect (capture-location-end locations 2) :to-equal 9)
-    (multiple-value-bind (start end)
-        (scan-captures-into regex locations "next")
+    (multiple-value-bind (start end) (scan-captures-into regex locations "next")
       (expect start :to-equal 0)
       (expect end :to-equal 4))
     (expect (capture-location-start locations 2) :to-be-null)
@@ -159,24 +169,22 @@
     (expect (capture-location-start locations 0) :to-be-null)
     (expect (capture-location-end locations 1) :to-be-null)
     (signals type-error (capture-location-start locations 3))
-    (signals type-error
-      (scan-captures-into (compile-regex "(a)") locations "a"))
+    (signals type-error (scan-captures-into (compile-regex "(a)") locations "a"))
     (signals type-error (scan-captures-into-at regex locations "item" -1)))
   (let* ((regex (compile-byte-regex "(a)(b)?" :unicode nil))
          (locations (regex-capture-locations regex))
          (text (make-array 1 :element-type '(unsigned-byte 8) :initial-contents '(97))))
-    (multiple-value-bind (start end)
-        (scan-captures-into regex locations text)
+    (multiple-value-bind (start end) (scan-captures-into regex locations text)
       (expect start :to-equal 0)
       (expect end :to-equal 1))
     (expect (capture-location-start locations 1) :to-equal 0)
     (expect (capture-location-end locations 2) :to-be-null)
-    (multiple-value-bind (start end)
-        (scan-captures-into-at regex locations text 0)
+    (multiple-value-bind (start end) (scan-captures-into-at regex locations text 0)
       (expect start :to-equal 0)
       (expect end :to-equal 1))))
 
-(it "selects RE2-style leftmost-longest matches without changing scan"
+(it
+  "selects RE2-style leftmost-longest matches without changing scan"
   (let* ((regex (compile-regex "(?<unit>a|aa)"))
          (text "xaab"))
     (expect (match-string (scan regex text) text) :to-equal "a")
@@ -185,22 +193,24 @@
       (expect (match-start result) :to-equal 1)
       (expect (match-group-string result "unit" text) :to-equal "aa")))
   (let ((regex (compile-regex "a+|b+")))
-    (expect (match-string (longest-match regex "aa-bbbb") "aa-bbbb")
-            :to-equal "aa")
-    (expect (match-string (longest-match regex "xaaa" :start 2) "xaaa")
-            :to-equal "aa"))
+    (expect (match-string (longest-match regex "aa-bbbb") "aa-bbbb") :to-equal "aa")
+    (expect
+      (match-string (longest-match regex "xaaa" :start 2) "xaaa")
+      :to-equal
+      "aa"))
   (let ((regex (compile-regex "a*|b+")))
-    (expect (match-string (longest-match regex "b") "b")
-            :to-equal "b"))
+    (expect (match-string (longest-match regex "b") "b") :to-equal "b"))
   (let* ((regex (compile-regex "(?<preferred>a)|(?<other>a)"))
          (result (longest-match regex "a")))
     (expect (match-group-string result "preferred" "a") :to-equal "a")
     (expect (match-group-string result "other" "a") :to-be-null))
   (let* ((regex (compile-byte-regex "(?-u:\\x80+)"))
-         (text (make-array 3 :element-type '(unsigned-byte 8)
-                            :initial-contents '(128 128 1))))
-    (expect (coerce (match-string (longest-match regex text) text) 'list)
-            :to-equal '(128 128))))
+         (text
+        (make-array 3 :element-type '(unsigned-byte 8) :initial-contents '(128 128 1))))
+    (expect
+      (coerce (match-string (longest-match regex text) text) 'list)
+      :to-equal
+      '(128 128))))
 
 (it
   "supports bounded repetition, non-capturing groups, and whitespace shorthands"
@@ -263,12 +273,14 @@
       :to-equal
       final-sigma)
     (expect (match-string (match "(?i)[k]" kelvin) kelvin) :to-equal kelvin)
-    (expect (match-string (match "(?i)ß" capital-sharp-s) capital-sharp-s)
-            :to-equal
-            capital-sharp-s)
-    (expect (match-string (match "(?i)[ß]" capital-sharp-s) capital-sharp-s)
-            :to-equal
-            capital-sharp-s)
+    (expect
+      (match-string (match "(?i)ß" capital-sharp-s) capital-sharp-s)
+      :to-equal
+      capital-sharp-s)
+    (expect
+      (match-string (match "(?i)[ß]" capital-sharp-s) capital-sharp-s)
+      :to-equal
+      capital-sharp-s)
     (expect (match "(?i)[f]" ff-ligature) :to-be-null)
     (expect (match "(?i)[i]" dotted-i) :to-be-null)
     (expect (match "(?i)[s]" sharp-s) :to-be-null)
@@ -276,3 +288,15 @@
       (match-string (match (format nil "(?i)[~C]" sigma) final-sigma) final-sigma)
       :to-equal
       final-sigma)))
+
+(it
+  "recognizes public match result and capture location values"
+  (let* ((regex (compile-regex "(a)"))
+         (result (scan regex "a"))
+         (locations (regex-capture-locations regex)))
+    (expect (match-result-p result) :to-be-truthy)
+    (expect (match-result-p nil) :to-be nil)
+    (expect (match-result-p "a") :to-be nil)
+    (expect (capture-locations-p locations) :to-be-truthy)
+    (expect (capture-locations-p nil) :to-be nil)
+    (expect (capture-locations-p result) :to-be nil)))

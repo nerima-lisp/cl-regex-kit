@@ -39,8 +39,12 @@ jobs:
 
       # Runs the SBCL test suite (checks.default), the treefmt formatting gate
       # (checks.formatting), and the mkdocs --strict build (checks.docs).
+      # --keep-going: without it, Nix cancels every other in-flight check as
+      # soon as any one fails, so one broken check (e.g. checks.benchmark)
+      # hides whether the test suite itself passed. This still exits
+      # non-zero, and still fails the job, if any check fails.
       - name: Check flake
-        run: nix flake check --print-build-logs
+        run: nix flake check --keep-going --print-build-logs
 
       # Catches stray conflict markers and whitespace errors that compile fine.
       - name: Check diff hygiene

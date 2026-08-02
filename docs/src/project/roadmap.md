@@ -25,8 +25,9 @@ non-overlapping results while safely advancing through zero-length matches.
    classes, and zero-length multi-match advancement.
 6. SBCL `sb-cover` instrumentation produces an HTML report for every
    production source file. Run `nix run .#coverage` to write them to
-   `coverage/`; the Nix check enforces at least 90% expression and 85% branch
-   coverage across handwritten source files.
+   `coverage/`; the Nix check enforces 100% expression and 100% branch
+   coverage across handwritten source files (generated Unicode data files are
+   excluded; see `run-coverage.lisp`'s `+generated-source-file-names+`).
 7. Shrinkable property tests cover escaping, bounded repetition, and merged
    regex-set equivalence; bounded parser fuzzing rejects only documented
    syntax errors and exposes all other failures.
@@ -35,6 +36,59 @@ non-overlapping results while safely advancing through zero-length matches.
 
 See [Compatibility](../reference/compatibility.md): backreferences and lookaround
 are not planned, by design.
+
+## Known gaps
+
+- **Coverage sits below the 100%/100% gate** (96.49% expression / 94.23%
+  branch as of this writing, up from 95.63%/93.38% after a pass that
+  downloaded the `sb-cover` HTML report from CI and read every uncovered
+  line across all 23 flagged files, rather than assuming the whole gap was
+  structural). That pass separated two real categories:
+  - Structural `sb-cover` blind spots that account for most of the
+    remaining 252 uncovered expressions: `in-package`, value-less
+    `defvar`/`defconstant`, `defmacro`/`defclass` bodies, `defparameter`
+    data literals, and `&key` defaults never show "executed" regardless of
+    how thoroughly the surrounding file is exercised -- confirmed by
+    `scan`'s `(start 0)` default still showing uncovered even though
+    several different test files already call it without `:start`.
+  - Real, reachable logic nothing exercised, closed in that same pass (see
+    the `git log` message "close real coverage gaps found by inspecting
+    the sb-cover HTML report" for the full list): a character-class item
+    ordering that flushes pending literal ranges before a POSIX class or
+    an escape matcher, `\P{...}` negation and `\B`/`\C`/`\Q`-as-literal
+    inside a class, the lazy optional `a??` quantifier, an alternation
+    whose first (not second) branch is itself non-static, `\p{NChar}`'s
+    fast-path range check, and a Unicode property
+    (`Grapheme_Extend`/U+09BE) that falls outside SBCL's own grapheme-break
+    classification.
+  - Not conclusively resolved in the time available: two defensive
+    "should never happen" `error` catch-alls in `nfa.lisp` (every `inst-op`
+    and AST node subtype the compiler can emit already has its own case
+    arm, so these look like closed-enumeration guards rather than reachable
+    gaps); one arm of `changes-when-case-mapped-p`'s
+    lowercase/titlecase/uppercase `or` chain in
+    `unicode-property-resolver.lisp` (titlecase and uppercase mappings
+    coincide for ordinary letters, so the short-circuit order makes the
+    uppercase-only arm hard to isolate without a character where titlecase
+    is the identity but uppercase is not); three `fail` branches in
+    `regex-grammar-support.lisp`/`regex-grammar.lisp` whose triggering
+    input wasn't found through code reading alone. `ensure-byte-character`'s
+    own `> #xff` check is likely genuinely unreachable: every call site
+    that reaches it (`ensure-byte-class-character`, `range`) either already
+    rejects a non-raw-octet character above `#x7f` first, or only ever
+    passes bounds that are structurally `<= #xff` (`\xHH` and `\ooo`
+    escapes cannot produce a larger value).
+- **`checks.benchmark` fails independent of any of this branch's own
+  changes**: `nix flake check`'s `mkTestApp`-driven build of the benchmark
+  app compiles `run-benchmarks.lisp` against a read-only Nix store
+  checkout and gets `SB-INT:SIMPLE-FILE-ERROR "Permission denied"`
+  writing a fasl beside the source, reproduced identically against the
+  script's unmodified, pre-refactor form. An ASDF output-translations
+  redirect (scoped to the checkout's own subtree, `:inherit-configuration`
+  for everything else) did not resolve it and was not kept; whatever
+  `mkTestApp`'s own fasl-cache wiring assumes about its build environment
+  needs its own investigation, most likely in `cl-nix-forge` rather than
+  in this repository.
 
 ## Future extensions
 

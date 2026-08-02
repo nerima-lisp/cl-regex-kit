@@ -1,21 +1,71 @@
 ;;;; t/nfa-test.lisp
 (in-package #:cl-regex-kit/test)
 
-(it "compiles every supported AST node to a terminating instruction program"
-  (multiple-value-bind (program group-count)
-      (cl-regex-kit::compile-to-nfa (cl-regex-kit::parse-regex "^(a|b)[0-9]{2,3}$") "^(a|b)[0-9]{2,3}$")
+(it
+  "compiles every supported AST node to a terminating instruction program"
+  (multiple-value-bind (program group-count) (cl-regex-kit::compile-to-nfa
+      (cl-regex-kit::parse-regex "^(a|b)[0-9]{2,3}$")
+      "^(a|b)[0-9]{2,3}$")
     (expect group-count :to-equal 1)
-    (expect (cl-regex-kit::inst-op (aref program (1- (length program)))) :to-be :match)))
+    (expect
+      (cl-regex-kit::inst-op (aref program (1- (length program))))
+      :to-be
+      :match)))
 
 (it-property
   "every generated valid pattern compiles to a program ending in :match"
-  ((pattern (gen-map (lambda (parts) (apply #'concatenate 'string parts))
-                     (gen-list (gen-member '("a" "b" "." "[0-9]" "a*" "b+" "c?" "(ab)" "a|b"))
-                               :min-length 1 :max-length 6)
-                     :name :pattern)))
-  (multiple-value-bind (program group-count)
-      (cl-regex-kit::compile-to-nfa (cl-regex-kit::parse-regex pattern) pattern)
+  ((pattern
+      (gen-map
+        (lambda (parts)
+          (apply #'concatenate 'string parts))
+        (gen-list
+          (gen-member '("a" "b" "." "[0-9]" "a*" "b+" "c?" "(ab)" "a|b"))
+          :min-length
+          1
+          :max-length
+          6)
+        :name
+        :pattern)))
+  (multiple-value-bind (program group-count) (cl-regex-kit::compile-to-nfa (cl-regex-kit::parse-regex pattern) pattern)
     (declare (ignore group-count))
     (expect (plusp (length program)) :to-be-truthy)
-    (expect (cl-regex-kit::inst-op (aref program (1- (length program))))
-            :to-be :match)))
+    (expect
+      (cl-regex-kit::inst-op (aref program (1- (length program))))
+      :to-be
+      :match)))
+
+(it
+  "preserves alternation priority while compiling many branches linearly"
+  (let* ((program (cl-regex-kit::regex-program (compile-regex "a|b|c")))
+         (entry (cl-regex-kit::inst-b (aref program 0)))
+         (root (aref program entry)))
+    (expect (cl-regex-kit::inst-op root) :to-be :split)
+    (expect
+      (cl-regex-kit::inst-op (aref program (cl-regex-kit::inst-a root)))
+      :to-be
+      :split)
+    (expect
+      (cl-regex-kit::literal-node-char
+        (cl-regex-kit::inst-a (aref program (cl-regex-kit::inst-b root))))
+      :to-be
+      #\c))
+  (let* ((branch-count 2048)
+         (branches
+        (loop repeat branch-count
+              collect (make-instance (quote cl-regex-kit::literal-node) :char #\a)))
+         (ast (make-instance (quote cl-regex-kit::alternation-node) :branches branches)))
+    (multiple-value-bind (program group-count) (cl-regex-kit::compile-to-nfa ast "large alternation")
+      (expect group-count :to-equal 0)
+      (expect (length program) :to-equal (+ (* 2 branch-count) 2))
+      (expect
+        (count :split program :key (function cl-regex-kit::inst-op))
+        :to-equal
+        (1- branch-count))
+      (expect
+        (every
+          (lambda (instruction)
+            (or
+              (not (eq (cl-regex-kit::inst-op instruction) :char))
+              (integerp (cl-regex-kit::inst-b instruction))))
+          program)
+        :to-be-truthy))))

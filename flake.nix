@@ -37,7 +37,7 @@
     # `cl-regex-kit/test` -- see `lispDependencies` below and
     # `cl-regex-kit.asd`'s `:depends-on`.
     cl-parser-kit = {
-      url = "github:nerima-lisp/cl-parser-kit/v1.0.1";
+      url = "github:nerima-lisp/cl-parser-kit/v1.0.2";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -124,13 +124,21 @@
       # read-only, store path).
       lispDependencies = ctx: [ cl-parser-kit.packages.${ctx.system}.cl-parser-kit ];
 
-      # cl-weave is a test-only ASDF dependency (`cl-regex-kit/test` depends
-      # on it; the production system's only dependency is cl-parser-kit,
-      # above). `lispCheckDependencies` is resolved only under `doCheck`, so
-      # the plain library package doesn't drag in the test framework,
-      # matching `cl-regex-kit.asd`'s `cl-regex-kit/test :depends-on`.
+      # cl-weave and cl-cli are test-only ASDF dependencies (the production
+      # system's only dependency is cl-parser-kit, above): `cl-regex-kit.asd`'s
+      # `cl-regex-kit/test` depends directly on cl-weave, and transitively on
+      # cl-cli through its own `:depends-on ("cl-regex-kit" "cl-regex-kit/cli"
+      # "cl-weave")`, since `cl-regex-kit/cli` (cli/main.lisp, the
+      # cl-regex-kit-grep example) is itself built on cl-cli -- see
+      # `packages.cl-regex-kit-grep` below for that same edge on the
+      # production side. `lispCheckDependencies` is resolved only under
+      # `doCheck`, so the plain library package doesn't drag in the test
+      # framework or the CLI's own dependency.
+      # cl-cli, like cl-parser-kit above, is itself an `mkPackageFlake`
+      # sibling, so it is passed as-is rather than through `cl.fromDerivation`.
       lispCheckDependencies = ctx: [
         (ctx.cl.fromDerivation { drv = cl-weave.packages.${ctx.system}.cl-weave; })
+        cl-cli.packages.${ctx.system}.cl-cli
       ];
 
       # `checks.default` and `apps.test` both drive run-tests.lisp (the
@@ -164,75 +172,123 @@
       # Granularity lives here, NOT in extra GitHub Actions jobs: `nix flake
       # check` evaluates each attribute as its own derivation, in parallel,
       # with build caching.
-      extraOutputs = ctx: {
-        packages.cl-regex-kit-grep = ctx.cl.mkExecutable {
-          args = {
-            pname = "cl-regex-kit-grep";
-            lispSystem = "cl-regex-kit/cli";
-            version = ctx.cl.fromAsdSystem ./cl-regex-kit.asd;
-            src = ctx.cl.mkLispSource { root = ./.; };
-            # cl-regex-kit itself is a sibling lispDependencies edge, exactly
-            # like cl-parser-kit is for the main package above; cl-cli is
-            # the one new dependency this executable adds.
-            lispDependencies = [
-              ctx.package
-              cl-cli.packages.${ctx.system}.cl-cli
+      extraOutputs =
+        ctx:
+        let
+          benchmark = ctx.cl.mkTestApp {
+            pname = "cl-regex-kit-benchmark";
+            src = ./.;
+            runner = "run-benchmarks.lisp";
+            lispDependencies = [ ctx.package ];
+            timeoutSeconds = 120;
+            killAfterSeconds = 30;
+            description = "Run the cl-regex-kit benchmark suite";
+          };
+        in
+        {
+          apps.benchmark = benchmark;
+
+          packages.cl-regex-kit-grep = ctx.cl.mkExecutable {
+            args = {
+              pname = "cl-regex-kit-grep";
+              lispSystem = "cl-regex-kit/cli";
+              version = ctx.cl.fromAsdSystem ./cl-regex-kit.asd;
+              src = ctx.cl.mkLispSource { root = ./.; };
+              # cl-regex-kit itself is a sibling lispDependencies edge, exactly
+              # like cl-parser-kit is for the main package above; cl-cli is
+              # the one new dependency this executable adds.
+              lispDependencies = [
+                ctx.package
+                cl-cli.packages.${ctx.system}.cl-cli
+              ];
+            };
+          };
+
+          checks.coverage = ctx.cl.mkCommandCheck {
+            # `.enableCheck`, not `ctx.package`: the coverage run loads
+            # `cl-regex-kit/test`, which needs `lispCheckDependencies` (cl-weave)
+            # on the resolved registry, and only the check-enabled derivation
+            # carries that.
+            drv = ctx.package.enableCheck;
+            name = "cl-regex-kit-coverage";
+            timeoutSeconds = 120;
+            killAfterSeconds = 30;
+            nativeBuildInputs = [ ctx.pkgs.perl ];
+            command = [
+              "${ctx.pkgs.sbcl}/bin/sbcl"
+              "--script"
+              "run-coverage.lisp"
+            ];
+            artifacts = [ "coverage/" ];
+            # Gate at 96%/92%, not 100%/100%: a line-by-line read of every
+            # flagged file (see docs/src/project/roadmap.md's "Known gaps")
+            # found that most of the remaining expression/branch gap is
+            # `sb-cover` never marking `in-package`, value-less
+            # `defvar`/`defconstant`, `defmacro`/`defclass` bodies,
+            # `defparameter` data literals, or `&key` defaults as executed,
+            # regardless of how thoroughly the surrounding code is exercised
+            # -- plus a couple of defensive `otherwise`/catch-all `error`
+            # branches guarding already-exhaustive `case`/`ecase` dispatches,
+            # which deleting would trade a small coverage-number gain for
+            # weaker protection against a future unhandled enum value. 100%
+            # is not reachable here without either regressing test-suite
+            # thoroughness's actual signal or removing that defensive code;
+            # these thresholds sit a couple of points below the current
+            # 96.49%/94.23% so the gate still catches a real regression.
+            validationCommands = [
+              ''
+                test -s coverage/cover-index.html
+                perl -0777 -ne '
+                  my ($expressions_covered, $expressions_total,
+                      $branches_covered, $branches_total) = (0, 0, 0, 0);
+                  while (m{
+                    <tr\ class=\x27(?:odd|even)\x27>
+                    <td\ class=\x27text-cell\x27>.*?</td>
+                    <td>(\d+)</td><td>(\d+)</td><td>[^<]*</td>
+                    <td>(\d+|-)</td><td>(\d+|-)</td>
+                  }gsx) {
+                    $expressions_covered += $1;
+                    $expressions_total += $2;
+                    if ($3 ne "-") {
+                      $branches_covered += $3;
+                      $branches_total += $4;
+                    }
+                  }
+                  die "no source coverage rows found\n"
+                    unless $expressions_total && $branches_total;
+                  my $expression_percent =
+                    100 * $expressions_covered / $expressions_total;
+                  my $branch_percent = 100 * $branches_covered / $branches_total;
+                  printf "Coverage: expressions %d/%d (%.2f%%), branches %d/%d (%.2f%%)\n",
+                    $expressions_covered, $expressions_total, $expression_percent,
+                    $branches_covered, $branches_total, $branch_percent;
+                  die sprintf("expression coverage %.2f%% is below the 96%% gate\n",
+                              $expression_percent)
+                    if $expression_percent < 96;
+                  die sprintf("branch coverage %.2f%% is below the 92%% gate\n",
+                              $branch_percent)
+                    if $branch_percent < 92;
+                ' coverage/cover-index.html
+              ''
+            ];
+          };
+
+          checks.benchmark = ctx.cl.mkCommandCheck {
+            drv = ctx.package;
+            name = "cl-regex-kit-benchmark";
+            timeoutSeconds = 120;
+            killAfterSeconds = 30;
+            command = [
+              "${ctx.pkgs.coreutils}/bin/env"
+              "CL_REGEX_KIT_BENCH_ITERATIONS=100"
+              "CL_REGEX_KIT_BENCH_COMPILE_ITERATIONS=10"
+              "CL_REGEX_KIT_BENCH_WARMUP=10"
+              "CL_REGEX_KIT_BENCH_SAMPLES=1"
+              "CL_REGEX_KIT_BENCH_SEED=1729"
+              "CL_REGEX_KIT_BENCH_REVISION=nix-check"
+              benchmark.program
             ];
           };
         };
-
-        checks.coverage = ctx.cl.mkCommandCheck {
-          # `.enableCheck`, not `ctx.package`: the coverage run loads
-          # `cl-regex-kit/test`, which needs `lispCheckDependencies` (cl-weave)
-          # on the resolved registry, and only the check-enabled derivation
-          # carries that.
-          drv = ctx.package.enableCheck;
-          name = "cl-regex-kit-coverage";
-          timeoutSeconds = 120;
-          nativeBuildInputs = [ ctx.pkgs.perl ];
-          command = [
-            "${ctx.pkgs.sbcl}/bin/sbcl"
-            "--script"
-            "run-coverage.lisp"
-          ];
-          artifacts = [ "coverage/" ];
-          validationCommands = [
-            ''
-              test -s coverage/cover-index.html
-              perl -0777 -ne '
-                my ($expressions_covered, $expressions_total,
-                    $branches_covered, $branches_total) = (0, 0, 0, 0);
-                while (m{
-                  <tr\ class=\x27(?:odd|even)\x27>
-                  <td\ class=\x27text-cell\x27>.*?</td>
-                  <td>(\d+)</td><td>(\d+)</td><td>[^<]*</td>
-                  <td>(\d+|-)</td><td>(\d+|-)</td>
-                }gsx) {
-                  $expressions_covered += $1;
-                  $expressions_total += $2;
-                  if ($3 ne "-") {
-                    $branches_covered += $3;
-                    $branches_total += $4;
-                  }
-                }
-                die "no source coverage rows found\n"
-                  unless $expressions_total && $branches_total;
-                my $expression_percent =
-                  100 * $expressions_covered / $expressions_total;
-                my $branch_percent = 100 * $branches_covered / $branches_total;
-                printf "Coverage: expressions %d/%d (%.2f%%), branches %d/%d (%.2f%%)\n",
-                  $expressions_covered, $expressions_total, $expression_percent,
-                  $branches_covered, $branches_total, $branch_percent;
-                die sprintf("expression coverage %.2f%% is below 90%%\n",
-                            $expression_percent)
-                  if $expression_percent < 90;
-                die sprintf("branch coverage %.2f%% is below 85%%\n",
-                            $branch_percent)
-                  if $branch_percent < 85;
-              ' coverage/cover-index.html
-            ''
-          ];
-        };
-      };
     };
 }

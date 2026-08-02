@@ -1,0 +1,46 @@
+{
+  "entries": [
+    {
+      "hash": "fnv1a64:81d909c7b5fce499",
+      "path": "src/api-match.lisp",
+      "rule": "duplicate-boolean-operands"
+    },
+    {
+      "hash": "fnv1a64:07cfcac6dabcddf4",
+      "path": "src/ast.lisp",
+      "rule": "accessor-arity"
+    },
+    {
+      "hash": "fnv1a64:e364f7d1663b6100",
+      "path": "src/regex-grammar.lisp",
+      "rule": "char-op-string"
+    },
+    {
+      "hash": "fnv1a64:0f084c48f20737c5",
+      "path": "src/regex-tokenizer-escapes.lisp",
+      "rule": "char-op-string"
+    },
+    {
+      "hash": "fnv1a64:138adcb340005dc6",
+      "path": "src/regex-tokenizer-escapes.lisp",
+      "rule": "char-op-string"
+    },
+    {
+      "hash": "fnv1a64:252fb8ccb974756d",
+      "path": "src/unicode-properties.lisp",
+      "rule": "duplicate-boolean-operands"
+    },
+    {
+      "hash": "fnv1a64:06a1f28cfd66f2d0",
+      "path": "src/unicode-properties.lisp",
+      "rule": "self-comparison"
+    },
+    {
+      "hash": "fnv1a64:e66acd38c149e2ad",
+      "path": "src/unicode-properties.lisp",
+      "rule": "self-comparison"
+    }
+  ],
+  "entry_count": 8,
+  "schema_version": 1
+}

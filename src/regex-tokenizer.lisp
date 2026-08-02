@@ -45,23 +45,32 @@
 (in-package #:cl-regex-kit)
 
 (defun posix-class-lookahead-p (pattern position)
-  (and (< (1+ position) (length pattern))
-       (char= (char pattern position) #\[)
-       (char= (char pattern (1+ position)) #\:)))
+  (and
+    (< (1+ position) (length pattern))
+    (char= (char pattern position) #\[)
+    (char= (char pattern (1+ position)) #\:)))
 
 (defun scan-posix-class-token (pattern position)
   "POSITION is at the opening `[` of a `[:name:]`/`[:^name:]` construct
 already confirmed by POSIX-CLASS-LOOKAHEAD-P. Returns (values (name
 . negated-p) next-position)."
   (let* ((scan (+ position 2))
-         (negated-p (and (< scan (length pattern)) (char= (char pattern scan) #\^)
-                          (prog1 t (incf scan))))
+         (negated-p
+        (and
+          (< scan (length pattern))
+          (char= (char pattern scan) #\^)
+          (prog1
+            t
+            (incf scan))))
          (name-start scan))
-    (loop while (and (< scan (length pattern)) (alpha-char-p (char pattern scan))) do (incf scan))
+    (loop while (and (< scan (length pattern)) (alpha-char-p (char pattern scan)))
+          do (incf scan))
     (when (= name-start scan)
       (tokenizer-fail pattern name-start "POSIX character class name cannot be empty"))
-    (unless (and (< (1+ scan) (length pattern))
-                 (char= (char pattern scan) #\:) (char= (char pattern (1+ scan)) #\]))
+    (unless (and
+        (< (1+ scan) (length pattern))
+        (char= (char pattern scan) #\:)
+        (char= (char pattern (1+ scan)) #\]))
       (tokenizer-fail pattern name-start "Unclosed POSIX character class"))
     (values (cons (subseq pattern name-start scan) negated-p) (+ scan 2))))
 
@@ -74,9 +83,9 @@ next-position); TYPE is :ESCAPE for every recognized form."
     (macrolet ((token (value next-position) `(values :escape ,value ,next-position)))
       (case escaped
         (#\p (multiple-value-bind (name negated-p after) (scan-unicode-property-name pattern next)
-               (token (list :kind :unicode-property :name name :negated-p negated-p :from-p nil) after)))
+               (token (list :kind :unicode-property :descriptor name :negated-p negated-p :from-p nil) after)))
         (#\P (multiple-value-bind (name negated-p after) (scan-unicode-property-name pattern next)
-               (token (list :kind :unicode-property :name name :negated-p negated-p :from-p t) after)))
+               (token (list :kind :unicode-property :descriptor name :negated-p negated-p :from-p t) after)))
         ((#\d #\D #\w #\W #\s #\S) (token (list :kind :shorthand :which escaped) next))
         (#\b (if class-mode-p
                  (token (list :kind :literal :char (code-char 8)) next)
@@ -138,48 +147,65 @@ next-position); TYPE is :ESCAPE for every recognized form."
 
 (defun structural-token-type (character)
   (case character
-    (#\( :lparen) (#\) :rparen) (#\| :pipe) (#\* :star) (#\+ :plus) (#\? :question)
-    (#\. :dot) (#\^ :caret) (#\$ :dollar) (#\[ :lbracket) (#\{ :lbrace) (#\} :rbrace)
-    (#\, :comma) (otherwise :char)))
+    (#\( :lparen)
+    (#\) :rparen)
+    (#\| :pipe)
+    (#\* :star)
+    (#\+ :plus)
+    (#\? :question)
+    (#\. :dot)
+    (#\^ :caret)
+    (#\$ :dollar)
+    (#\[ :lbracket)
+    (#\{ :lbrace)
+    (#\} :rbrace)
+    (#\, :comma)
+    (otherwise :char)))
 
 (defun tokenize-regex-pattern (pattern)
   "Tokenize PATTERN into a (VECTOR CL-PARSER-KIT:TOKEN), consulting the
 fixed-for-this-parse *REGEX-BYTE-MODE-P*/*REGEX-OCTAL-P* dynamic bindings
 established by PARSE-REGEX."
   (let ((tokens (make-array 0 :adjustable t :fill-pointer 0))
-        (position 0) (length (length pattern)) (class-depth 0))
+        (position 0)
+        (length (length pattern))
+        (class-depth 0))
     (flet ((emit (type value start end)
-             (vector-push-extend (make-token :type type :value value :start start :end end) tokens)))
-      (loop while (< position length) do
-        (let ((start position) (character (char pattern position)))
+             (vector-push-extend
+            (make-token :type type :value value :start start :end end)
+            tokens)))
+      (loop while (< position length)
+            do (let ((start position)
+              (character (char pattern position)))
           (cond
             ((char= character #\\)
-             (multiple-value-bind (type value next) (tokenize-escape pattern (1+ position) (plusp class-depth))
-               (emit type value start next)
-               (setf position next)))
+              (multiple-value-bind (type value next) (tokenize-escape pattern (1+ position) (plusp class-depth))
+                (emit type value start next)
+                (setf position next)))
             ((and (plusp class-depth) (posix-class-lookahead-p pattern position))
-             (multiple-value-bind (posix next) (scan-posix-class-token pattern position)
-               (emit :posix-class posix start next)
-               (setf position next)))
+              (multiple-value-bind (posix next) (scan-posix-class-token pattern position)
+                (emit :posix-class posix start next)
+                (setf position next)))
             ((plusp class-depth)
-             (cond
-               ((char= character #\[)
-                (incf class-depth)
-                (emit :lbracket character start (1+ position))
-                (setf position (1+ position)))
-               ((char= character #\])
-                (decf class-depth)
-                (emit :rbracket character start (1+ position))
-                (setf position (1+ position)))
-               ((char= character #\-)
-                (emit :hyphen character start (1+ position))
-                (setf position (1+ position)))
-               (t
-                (emit :char character start (1+ position))
-                (setf position (1+ position)))))
+              (cond
+                ((char= character #\[)
+                  (incf class-depth)
+                  (emit :lbracket character start (1+ position))
+                  (incf position))
+                ((char= character #\])
+                  (decf class-depth)
+                  (emit :rbracket character start (1+ position))
+                  (incf position))
+                ((char= character #\-)
+                  (emit :hyphen character start (1+ position))
+                  (incf position))
+                (t
+                  (emit :char character start (1+ position))
+                  (incf position))))
             (t
-             (let ((type (structural-token-type character)))
-               (when (eq type :lbracket) (incf class-depth))
-               (emit type character start (1+ position))
-               (setf position (1+ position)))))))
+              (let ((type (structural-token-type character)))
+                (when (eq type :lbracket)
+                  (incf class-depth))
+                (emit type character start (1+ position))
+                (incf position))))))
       (coerce tokens 'simple-vector))))

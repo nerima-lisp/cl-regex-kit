@@ -24,33 +24,50 @@ and a line number when requested. Returns the number of lines printed."
         (values (search-stream regex stream label invert-match-p line-numbers-p count-only-p stdout) nil))
     (file-error (condition)
       (format stderr "~A: ~A~%" file condition)
+      (values 0 t))
+    (stream-error (condition)
+      (format stderr "~A: ~A~%" file condition)
       (values 0 t))))
 
 (defun run-grep (invocation)
   "MAKE-APP's :HANDLER: compile the pattern once, then search every FILES
 positional (or standard input, when none were given), and return a
 grep-compatible exit code (0 on at least one match, 1 on none, 2 on error)."
-  (let* ((pattern (positional-value invocation :pattern))
-         (files (positional-value invocation :files))
-         (invert-match-p (option-value invocation :invert-match))
-         (count-only-p (option-value invocation :count))
-         (line-numbers-p (option-value invocation :line-number))
-         (stdout (invocation-stdout invocation))
-         (stderr (invocation-stderr invocation))
-         (regex (compile-regex pattern :case-insensitive (option-value invocation :ignore-case)))
-         (total-matches 0)
-         (error-p nil))
-    (if files
-        (dolist (file files)
-          (multiple-value-bind (matches file-error-p)
-              (search-file regex file (and (rest files) file)
-                           invert-match-p line-numbers-p count-only-p stdout stderr)
-            (incf total-matches matches)
-            (when file-error-p (setf error-p t))))
-        (setf total-matches
-              (search-stream regex *standard-input* nil invert-match-p line-numbers-p count-only-p stdout)))
-    (when count-only-p (format stdout "~D~%" total-matches))
-    (cond (error-p 2) ((zerop total-matches) 1) (t 0))))
+  (let ((stderr (invocation-stderr invocation)))
+    (handler-case
+        (let* ((pattern (positional-value invocation :pattern))
+               (files (positional-value invocation :files))
+               (multiple-files-p (rest files))
+               (invert-match-p (option-value invocation :invert-match))
+               (count-only-p (option-value invocation :count))
+               (line-numbers-p (option-value invocation :line-number))
+               (stdout (invocation-stdout invocation))
+               (regex (compile-regex pattern :case-insensitive (option-value invocation :ignore-case)))
+               (total-matches 0)
+               (error-p nil))
+          (if files
+              (dolist (file files)
+                (multiple-value-bind (matches file-error-p)
+                    (search-file regex file (and multiple-files-p file)
+                                 invert-match-p line-numbers-p count-only-p stdout stderr)
+                  (incf total-matches matches)
+                  (when count-only-p
+                    (if multiple-files-p
+                        (format stdout "~A:~D~%" file matches)
+                        (format stdout "~D~%" matches)))
+                  (when file-error-p (setf error-p t))))
+              (handler-case
+                  (progn
+                    (setf total-matches
+                          (search-stream regex *standard-input* nil invert-match-p line-numbers-p count-only-p stdout))
+                    (when count-only-p (format stdout "~D~%" total-matches)))
+                (stream-error (condition)
+                  (format stderr "standard input: ~A~%" condition)
+                  (setf error-p t))))
+          (cond (error-p 2) ((zerop total-matches) 1) (t 0)))
+      (cl-regex-kit:regex-syntax-error (condition)
+        (format stderr "invalid regular expression: ~A~%" condition)
+        2))))
 
 (defparameter *app*
   (make-app

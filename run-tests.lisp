@@ -15,7 +15,7 @@
 (defun configure-local-source-registry (root)
   (asdf:initialize-source-registry
    `(:source-registry
-     (:tree ,root)
+     (:directory ,root)
      :inherit-configuration)))
 
 (let ((root (script-directory)))

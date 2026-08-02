@@ -1,0 +1,33 @@
+# paredit-cli configuration for cl-regex-kit. See `paredit config schema` for
+# every key; this file only sets what this project needs to override.
+
+[lint]
+# CI/local runs should fail on likely-and-certain bugs (error severity), not
+# on style/idiom suggestions (warning severity) -- those stay visible for
+# opportunistic cleanup but do not block.
+fail-on = "error"
+
+# duplicate-case-keys compares CASE/ECASE character keys case-insensitively,
+# but Common Lisp's CASE/ECASE use EQL, which is case-sensitive for
+# characters. This project's hand-written tokenizer/grammar
+# (regex-tokenizer.lisp, regex-tokenizer-escapes.lisp, parser-syntax.lisp,
+# regex-grammar-classes.lisp) deliberately gives \\d and \\D, \\b and \\B,
+# \\p and \\P, and similar upper/lowercase escape-letter pairs different
+# clauses with different meanings -- the standard convention across
+# Perl/PCRE/RE2/Rust regex-syntax. Every one of this rule's findings on this
+# codebase (12, across those four files, as of this writing) is this same
+# false positive, not a real duplicate key; disabling it here is a
+# rule-level exemption rather than a per-finding one so a future addition of
+# another such pair does not need its own baseline entry.
+disable = ["duplicate-case-keys"]
+
+# The 8 remaining error-severity findings as of this writing are reviewed,
+# individually-verified false positives from other rules' own blind spots
+# (no flow-sensitive narrowing across AND/WHEN guards for char-op-string; no
+# awareness of DEFINE-REGEX-NODE's macro-DSL slot specs for accessor-arity;
+# treating a STRING=' :END1/:END2 bound pair as if it compared the same
+# operand to itself for self-comparison; and not recognizing the "guard,
+# then return the checked value" AND idiom for duplicate-boolean-operands).
+# See the baseline file itself for exactly which findings, and the git log
+# for the commit that reviewed each one.
+baseline = ".paredit-lint-baseline.json"
