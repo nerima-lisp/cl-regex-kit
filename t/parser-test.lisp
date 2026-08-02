@@ -14,10 +14,10 @@
           ("\\p{}") ("\\p{") ("\\p") ("\\x") ("\\x{}") ("\\x{1")
           ("\\x{110000}") ("\\x{D800}") ("\\uD800") ("\\u{D800}") ("\\U0000D800")
           ("\\U{D800}") ("\\u123") ("\\U00110000") ("\\400")
-          ("\\b{") ("\\b{middle}") ("[[:]]") ("[[:unknown:]]")
-          ("[a-\\d]") ("[a") ("[a&&]") ("(?Pname)") ("(?q)a")
+          ("\\b{") ("\\b{middle}") ("\\b{start") ("[[:]]") ("[[:unknown:]]")
+          ("[a-\\d]") ("[a") ("[") ("[a&&]") ("(?Pname)") ("(?q)a")
           ("(?i?a)") ("(?ii)a") ("(?i-i)a") ("(?i--m)a")
-          ("a{") ("a{1,0}") ("a{1001}") ("a**"))
+          ("a{") ("a{1") ("a{1,0}") ("a{1001}") ("a**"))
     "rejects the malformed pattern ~S with regex-syntax-error"
     (pattern)
   (signals regex-syntax-error (cl-regex-kit::parse-regex pattern)))
