@@ -36,20 +36,20 @@
   (ensure-byte-character end)
   (cons (char-code start) (char-code end)))
 
+(defparameter +ascii-shorthand-character-ranges+
+  `((#\d (#\0 . #\9))
+    (#\w (#\a . #\z) (#\A . #\Z) (#\0 . #\9) (#\_ . #\_))
+    (#\s (#\Space . #\Space) (#\Tab . #\Tab) (#\Newline . #\Newline)
+      (#\Return . #\Return) (#\Page . #\Page) (,(code-char 11) . ,(code-char 11))))
+  "ASCII character-range data for the \\d/\\w/\\s shorthand classes, keyed by
+their lowercase letter -- \\D/\\W/\\S share the same ranges and differ only
+in the negation CLASS-ITEM-FROM-ESCAPE applies around SHORTHAND-MATCHER's
+result.")
+
 (defun shorthand-ranges (character)
-  (case character
-    ((#\d #\D) (list (range #\0 #\9)))
-    ((#\w #\W)
-      (list (range #\a #\z) (range #\A #\Z) (range #\0 #\9) (range #\_ #\_)))
-    ((#\s #\S)
-      (list
-        (range #\Space #\Space)
-        (range #\Tab #\Tab)
-        (range #\Newline #\Newline)
-        (range #\Return #\Return)
-        (range #\Page #\Page)
-        (range (code-char 11) (code-char 11))))
-    (otherwise nil)))
+  (mapcar (lambda (bound) (range (car bound) (cdr bound)))
+          (cdr (assoc (char-downcase character) +ascii-shorthand-character-ranges+
+                      :test #'char=))))
 
 (defun shorthand-matcher (character)
   (if (flag-p +flag-unicode+) (case character
