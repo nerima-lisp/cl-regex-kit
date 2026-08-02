@@ -105,17 +105,46 @@ RUN-PIKE-VM invoked, not how to get there."
   (let ((limit (validate-text-range regex text start end)))
     (call-with-timeout timeout (lambda () (funcall thunk limit)))))
 
+(defmacro with-pike-vm-match ((result regex text start end timeout &rest vm-keys) &body body)
+  "Bind RESULT to REGEX's MATCH-RESULT (or NIL) in TEXT's validated
+[START, END) range, then evaluate BODY. RESULT is intentional anaphora: BODY
+names it to read the outcome, exactly like the LET it replaces.
+
+Expands to a CALL-WITH-VALIDATED-MATCH invocation whose continuation runs
+RUN-PIKE-VM with the :start/:end/:never-newline-p arguments every SCAN-shaped
+entry point supplies, plus VM-KEYS for the one flag (:shortest-p or
+:longest-p) that distinguishes it from a plain leftmost-first SCAN. This is
+the one place that assembles a RUN-PIKE-VM call, so SCAN, SHORTEST-MATCH, and
+LONGEST-MATCH differ only in VM-KEYS and what BODY does with RESULT.
+
+REGEX/TEXT/START/END/TIMEOUT are each evaluated exactly once, in the order
+written, regardless of how many times the expansion below references them."
+  (let ((regex-var (gensym "REGEX-"))
+        (text-var (gensym "TEXT-"))
+        (start-var (gensym "START-"))
+        (end-var (gensym "END-"))
+        (timeout-var (gensym "TIMEOUT-")))
+    `(let* ((,regex-var ,regex)
+            (,text-var ,text)
+            (,start-var ,start)
+            (,end-var ,end)
+            (,timeout-var ,timeout)
+            (,result
+              (call-with-validated-match
+               ,regex-var ,text-var ,start-var ,end-var ,timeout-var
+               (lambda (limit)
+                 (run-pike-vm (regex-program ,regex-var) ,text-var
+                              :start ,start-var
+                              :end limit
+                              :never-newline-p (regex-never-newline-p ,regex-var)
+                              ,@vm-keys)))))
+       ,@body)))
+
 (defun scan (regex text &key (start 0) end timeout)
   "Find the leftmost-first match of REGEX in TEXT within [START, END).
 Returns a MATCH-RESULT, or NIL if there is no match. TIMEOUT is a positive
 number of seconds, or NIL to impose no deadline."
-  (let ((result (call-with-validated-match
-                 regex text start end timeout
-                 (lambda (limit)
-                   (run-pike-vm (regex-program regex) text
-                                :start start
-                                :end limit
-                                :never-newline-p (regex-never-newline-p regex))))))
+  (with-pike-vm-match (result regex text start end timeout)
     (when result
       (setf (match-result-group-names result) (regex-group-names regex)))
     result))
@@ -173,14 +202,7 @@ remains the exclusive upper bound of the searched range."
 The selected match begins at the earliest position at or after START and has
 the earliest possible end position there. Return NIL when REGEX does not
 match. TIMEOUT is a positive number of seconds, or NIL to impose no deadline."
-  (let ((result (call-with-validated-match
-                 regex text start end timeout
-                 (lambda (limit)
-                   (run-pike-vm (regex-program regex) text
-                                :start start
-                                :end limit
-                                :shortest-p t
-                                :never-newline-p (regex-never-newline-p regex))))))
+  (with-pike-vm-match (result regex text start end timeout :shortest-p t)
     (and result (match-result-end result))))
 
 (defun shortest-match-at (regex text start &key end timeout)
@@ -195,14 +217,7 @@ remains the exclusive upper bound of the searched range."
 
 This provides RE2's longest-match selection without changing SCAN's Rust-style
 leftmost-first semantics. Return a MATCH-RESULT, or NIL if no match exists."
-  (let ((result (call-with-validated-match
-                 regex text start end timeout
-                 (lambda (limit)
-                   (run-pike-vm (regex-program regex) text
-                                :start start
-                                :end limit
-                                :longest-p t
-                                :never-newline-p (regex-never-newline-p regex))))))
+  (with-pike-vm-match (result regex text start end timeout :longest-p t)
     (when result
       (setf (match-result-group-names result) (regex-group-names regex)))
     result))
