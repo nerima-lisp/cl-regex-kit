@@ -162,13 +162,6 @@
           (cdr
             (assoc (format nil "V~D_~D" major minor) +unicode-age-ranges+ :test #'string=)))))))
 
-(defun valid-age-property-p (value)
-  (not (null (age-property-ranges value))))
-
-(defun age-property-p (value character)
-  (let ((ranges (age-property-ranges value)))
-    (and ranges (range-matches-p ranges character))))
-
 (defun ascii-hex-digit-p (character)
   "Return true when CHARACTER is an ASCII hexadecimal digit."
   (or
@@ -247,15 +240,6 @@
     (or
       (<= #xfdd0 code #xfdef)
       (and (>= code #xfffe) (member (logand code #xffff) '(#xfffe #xffff))))))
-
-(defun extra-unicode-binary-property-p (property character)
-  (let* ((canonical
-        (or
-          (cdr (assoc property +unicode-extra-binary-property-aliases+ :test #'string=))
-          property))
-         (ranges
-        (cdr (assoc canonical +unicode-extra-binary-property-ranges+ :test #'string=))))
-    (and ranges (range-matches-p ranges character))))
 
 (defmacro define-unicode-range-properties (&body definitions)
   "Create a declarative alias-to-range table for binary Unicode properties."
