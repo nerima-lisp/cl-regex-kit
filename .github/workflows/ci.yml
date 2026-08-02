@@ -49,17 +49,3 @@ jobs:
       # Catches stray conflict markers and whitespace errors that compile fine.
       - name: Check diff hygiene
         run: git diff --check
-
-      # Temporary: inspect the current coverage gap in detail. Remove once
-      # analyzed; checks.coverage above is the permanent gate.
-      - name: Coverage report (temporary diagnostic)
-        if: always()
-        run: nix develop --command sbcl --script run-coverage.lisp
-
-      - name: Upload coverage report (temporary diagnostic)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report
-          path: coverage/
-          retention-days: 1
