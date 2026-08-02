@@ -25,8 +25,9 @@ non-overlapping results while safely advancing through zero-length matches.
    classes, and zero-length multi-match advancement.
 6. SBCL `sb-cover` instrumentation produces an HTML report for every
    production source file. Run `nix run .#coverage` to write them to
-   `coverage/`; the Nix check enforces at least 90% expression and 85% branch
-   coverage across handwritten source files.
+   `coverage/`; the Nix check enforces 100% expression and 100% branch
+   coverage across handwritten source files (generated Unicode data files are
+   excluded; see `run-coverage.lisp`'s `+generated-source-file-names+`).
 7. Shrinkable property tests cover escaping, bounded repetition, and merged
    regex-set equivalence; bounded parser fuzzing rejects only documented
    syntax errors and exposes all other failures.

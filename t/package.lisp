@@ -7,8 +7,6 @@
    ;; Registration and assertions
    #:it #:it-each #:it-property #:it-fuzz
    #:expect #:signals #:run-all
-   ;; Custom matcher definition
-   #:defmatcher
    ;; Property generators
    #:gen-integer #:gen-string #:gen-list #:gen-member #:gen-map #:gen-such-that)
   (:import-from #:cl-regex-kit
