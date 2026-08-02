@@ -26,36 +26,43 @@
 
 PATTERNS must be a list or vector of pattern strings.  Its order defines the
 indexes returned by REGEX-SET-MATCHES.  OPTIONS are keyword arguments
-accepted by COMPILER and apply consistently to every pattern."
+accepted by COMPILER and apply consistently to every pattern.
+
+Each member's own SIZE-LIMIT bounds its individual compilation (enforced by
+COMPILER), but the aggregate merged program -- one root instruction per
+member, plus every member's program -- can still exceed SIZE-LIMIT even
+though no single member does. Checking that only after every member has
+compiled would let a pattern list compile up to (length PATTERNS) times
+SIZE-LIMIT worth of instructions before rejecting the set, so this compiles
+members one at a time and re-checks the running total after each one,
+bounding the worst-case unchecked work to one member's SIZE-LIMIT."
   (unless (or (listp patterns)
               (and (vectorp patterns) (not (stringp patterns))))
     (error 'type-error
            :datum patterns
            :expected-type '(or list (and vector (not string)))))
-  ;; Empty sets do not compile a member, but retain the same option contract.
   (apply #'validate-regex-compile-options byte-mode-p options)
   (let ((size-limit (getf options :size-limit +maximum-instruction-count+)))
     (check-type size-limit (integer 1 *))
     (let* ((pattern-vector (map 'vector #'copy-seq patterns))
-           (regexes (map 'vector
-                          (lambda (pattern)
-                            (apply compiler pattern options))
-                          pattern-vector))
-           (programs (map 'vector #'regex-program regexes))
+           (count (length pattern-vector))
            ;; Merging adds one root instruction per source program.
-           (instruction-count (+ (length programs)
-                                 (loop for program across programs
-                                       sum (length program)))))
-      (when (> instruction-count size-limit)
-        (error 'regex-syntax-error
-               :pattern patterns
-               :reason "Regular expression set exceeds the configured NFA instruction limit"))
-       (make-instance 'regex-set
-                      :patterns pattern-vector
-                      :byte-mode-p byte-mode-p
-                      :never-newline-p (and (plusp (length regexes))
-                                            (regex-never-newline-p (aref regexes 0)))
-                      :program (merge-nfa-programs programs)))))
+           (running-instruction-count count)
+           (regexes (make-array count)))
+      (dotimes (index count)
+        (let ((regex (apply compiler (aref pattern-vector index) options)))
+          (incf running-instruction-count (length (regex-program regex)))
+          (when (> running-instruction-count size-limit)
+            (error 'regex-syntax-error
+                   :pattern patterns
+                   :reason "Regular expression set exceeds the configured NFA instruction limit"))
+          (setf (aref regexes index) regex)))
+      (make-instance 'regex-set
+                     :patterns pattern-vector
+                     :byte-mode-p byte-mode-p
+                     :never-newline-p (and (plusp count)
+                                           (regex-never-newline-p (aref regexes 0)))
+                     :program (merge-nfa-programs (map 'vector #'regex-program regexes))))))
 
 (defun compile-regex-set (patterns &rest options)
   "Compile PATTERNS into a character-oriented REGEX-SET.
