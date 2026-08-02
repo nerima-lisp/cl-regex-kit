@@ -124,13 +124,21 @@
       # read-only, store path).
       lispDependencies = ctx: [ cl-parser-kit.packages.${ctx.system}.cl-parser-kit ];
 
-      # cl-weave is a test-only ASDF dependency (`cl-regex-kit/test` depends
-      # on it; the production system's only dependency is cl-parser-kit,
-      # above). `lispCheckDependencies` is resolved only under `doCheck`, so
-      # the plain library package doesn't drag in the test framework,
-      # matching `cl-regex-kit.asd`'s `cl-regex-kit/test :depends-on`.
+      # cl-weave and cl-cli are test-only ASDF dependencies (the production
+      # system's only dependency is cl-parser-kit, above): `cl-regex-kit.asd`'s
+      # `cl-regex-kit/test` depends directly on cl-weave, and transitively on
+      # cl-cli through its own `:depends-on ("cl-regex-kit" "cl-regex-kit/cli"
+      # "cl-weave")`, since `cl-regex-kit/cli` (cli/main.lisp, the
+      # cl-regex-kit-grep example) is itself built on cl-cli -- see
+      # `packages.cl-regex-kit-grep` below for that same edge on the
+      # production side. `lispCheckDependencies` is resolved only under
+      # `doCheck`, so the plain library package doesn't drag in the test
+      # framework or the CLI's own dependency.
+      # cl-cli, like cl-parser-kit above, is itself an `mkPackageFlake`
+      # sibling, so it is passed as-is rather than through `cl.fromDerivation`.
       lispCheckDependencies = ctx: [
         (ctx.cl.fromDerivation { drv = cl-weave.packages.${ctx.system}.cl-weave; })
+        cl-cli.packages.${ctx.system}.cl-cli
       ];
 
       # `checks.default` and `apps.test` both drive run-tests.lisp (the
