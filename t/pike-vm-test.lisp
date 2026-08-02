@@ -343,4 +343,8 @@
           (set (compile-byte-regex-set (quote ("\\p{L}" "a")))))
       (expect (regex-set-matches set text :end 1) :to-equal nil)
       (expect (regex-set-matches set text :end 2) :to-equal (quote (0)))
-      (expect (regex-set-matches set text :start 2 :end 3) :to-equal (quote (1))))))
+      ;; Both members match: "a" (U+0061) is itself a Unicode Letter, so
+      ;; \p{L} (pattern 0) matches it exactly as the literal "a" (pattern 1)
+      ;; does -- byte-mode \p{L} decodes and classifies the UTF-8 scalar at
+      ;; each position rather than treating multi-byte sequences specially.
+      (expect (regex-set-matches set text :start 2 :end 3) :to-equal (quote (0 1))))))

@@ -11,16 +11,18 @@
    #:gen-integer #:gen-string #:gen-list #:gen-member #:gen-map #:gen-such-that)
   (:import-from #:cl-regex-kit
    #:compile-regex #:compile-byte-regex #:escape #:scan #:scan-at #:captures #:captures-at #:shortest-match #:shortest-match-at #:longest-match #:match #:byte-match #:is-match-p #:is-match-at #:all-matches #:do-matches #:do-captures
-   #:full-match
+   #:full-match #:full-match-p
    #:split #:split-terminator #:split-inclusive #:split-n #:replace-first #:replace-all #:replace-n
-   #:match-start #:match-end #:match-string
+   #:match-result #:match-start #:match-end #:match-string
    #:match-result-p
    #:match-captures
    #:match-group-start #:match-group-end #:match-group-string
+   #:capture-locations #:capture-locations-p
    #:regex-capture-locations #:capture-locations-count
    #:capture-location-start #:capture-location-end #:scan-captures-into #:scan-captures-into-at
+   #:regex #:byte-regex
    #:regex-p #:byte-regex-p #:regex-group-count #:regex-capture-count #:regex-static-capture-count
-   #:regex-capture-names #:regex-group-index
+   #:regex-capture-names #:regex-group-index #:regex-source
    #:compile-regex-set #:compile-byte-regex-set #:regex-set #:byte-regex-set
    #:regex-set-p #:byte-regex-set-p #:regex-set-patterns
    #:regex-set-count #:regex-set-empty-p
