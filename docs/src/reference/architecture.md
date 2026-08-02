@@ -338,3 +338,20 @@ adjacent, which would not preserve it.
   drive. Introducing it would add a runtime dependency to a system whose
   production code depends on nothing but `cl-parser-kit`, for a boundary
   this project does not actually have.
+- **`cl-codec-kit`** -- evaluated and **not adopted**. `utf8-character-at`/
+  `utf8-character-before` (`text-boundaries.lisp`) are not a general-purpose
+  codec: they decode one scalar at a time from a fixed cursor position while
+  tracking Pike-VM byte-offset validity (`byte-unicode-non-boundary-position-p`),
+  a shape a general encode/decode library does not expose and should not be
+  bent to fit.
+- **`cl-log-kit`, `cl-process-kit`, `cl-host-kit`, `cl-tty-kit`, `cl-dataflow`,
+  and the `cl-cc-*` compiler-construction family** -- surveyed via the org's
+  repository list and **not adopted**. Each targets a concern this library
+  does not have: structured logging, subprocess execution, filesystem/path
+  abstraction, terminal UI, and general dataflow-graph or compiler
+  infrastructure, respectively. `cl-regex-kit` is a pure, deterministic
+  computation over strings and octet vectors with no I/O, no subprocesses, and
+  no interactive surface outside the separate `cl-regex-kit/cli` system;
+  adopting any of these would be exactly the "変にAdapterを作らず" principle's
+  counter-example -- a dependency bent to a use it wasn't designed for, rather
+  than one that already fits.

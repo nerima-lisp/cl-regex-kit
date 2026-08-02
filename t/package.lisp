@@ -6,7 +6,9 @@
   (:import-from #:cl-weave
    ;; Registration and assertions
    #:it #:it-each #:it-property #:it-fuzz
-   #:expect #:signals #:run-all
+   #:expect #:expect-not #:signals #:run-all
+   ;; Custom matcher registration (t/matchers.lisp)
+   #:defmatcher #:expected-one
    ;; Property generators
    #:gen-integer #:gen-string #:gen-list #:gen-member #:gen-map #:gen-such-that)
   (:import-from #:cl-regex-kit

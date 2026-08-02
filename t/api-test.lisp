@@ -93,7 +93,7 @@
     (expect (match-start (captures regex text)) :to-equal 1)
     (expect (shortest-match regex text) :to-equal 2)
     (expect (match-start (longest-match regex text)) :to-equal 1)
-    (expect (is-match-p regex text) :to-be-truthy)
+    (expect text :to-match-regex regex)
     (expect (match-start (match "a+" text)) :to-equal 1)
     (expect (match-string (full-match regex "aa") "aa") :to-equal "aa"))
   (let* ((regex (compile-byte-regex "(?-u:a+)"))

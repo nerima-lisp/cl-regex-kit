@@ -80,6 +80,7 @@
   :pathname "t"
   :serial t
   :components ((:file "package")
+    (:file "matchers")
     (:file "ast-test")
     (:file "parser-test")
     (:file "nfa-test")

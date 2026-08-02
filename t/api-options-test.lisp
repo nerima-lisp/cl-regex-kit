@@ -13,10 +13,9 @@
   "supports RE2 literal and never-capture compilation options"
   (let* ((pattern "a b#c(d)")
          (regex (compile-regex pattern :literal t :ignore-whitespace t)))
-    (expect (is-match-p regex pattern) :to-be-truthy)
-    (expect (is-match-p regex "abc") :to-be-null))
-  (expect (is-match-p (compile-regex "a.b" :literal t :case-insensitive t) "A.B")
-          :to-be-truthy)
+    (expect pattern :to-match-regex regex)
+    (expect-not "abc" :to-match-regex regex))
+  (expect "A.B" :to-match-regex (compile-regex "a.b" :literal t :case-insensitive t))
   (let* ((regex (compile-regex "(a)(?<named>b)(?:c)" :never-capture t))
          (result (scan regex "abc")))
     (expect (regex-group-count regex) :to-equal 1)
@@ -190,8 +189,8 @@
   "provides compiled literals, boolean predicates, and bounded repetition"
   (let ((compiled (cl-regex-kit:regex "\\d+")))
     (expect (regex-p compiled) :to-be-truthy)
-    (expect (cl-regex-kit:is-match-p compiled "x42") :to-be-truthy)
-    (expect (cl-regex-kit:is-match-p compiled "abc") :to-be nil)
+    (expect "x42" :to-match-regex compiled)
+    (expect-not "abc" :to-match-regex compiled)
     (expect (cl-regex-kit:full-match-p compiled "42") :to-be-truthy)
     (expect (cl-regex-kit:full-match-p compiled "x42") :to-be nil)
     (expect
@@ -201,11 +200,11 @@
       (cl-regex-kit:full-match-p compiled "id=42!" :start 3 :end 6)
       :to-be nil))
   (let ((compiled (cl-regex-kit:regex "cat" :case-insensitive t)))
-    (expect (cl-regex-kit:is-match-p compiled "CAT") :to-be-truthy))
+    (expect "CAT" :to-match-regex compiled))
   (let ((compiled (cl-regex-kit:byte-regex "cat" :case-insensitive t))
         (text
         (make-array 3 :element-type '(unsigned-byte 8) :initial-contents '(67 65 84))))
-    (expect (cl-regex-kit:is-match-p compiled text) :to-be-truthy))
+    (expect text :to-match-regex compiled))
   (let ((compiled (cl-regex-kit:byte-regex "ab"))
         (text
           (make-array 4 :element-type '(unsigned-byte 8) :initial-contents '(120 97 98 121))))

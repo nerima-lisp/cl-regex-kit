@@ -45,13 +45,12 @@
           ("\\v" :vertical-tab t) ("\\d" "5" nil) ("\\s" :tab nil))
     "matches ~S against ~S under RE2/Rust semantics (unicode ~A)"
     (pattern text unicode)
-  (expect (is-match-p (compile-regex pattern :unicode unicode) (escape-form-text text))
-          :to-be-truthy))
+  (expect (escape-form-text text) :to-match-regex (compile-regex pattern :unicode unicode)))
 
 (it-each (("[\\0]" #.(code-char 0)) ("[\\12]" #\Newline) ("[\\141]" #\a))
     "accepts the ~A octal escape as ~S inside a character class"
     (pattern character)
-  (expect (is-match-p (compile-regex pattern) (string character)) :to-be-truthy))
+  (expect (string character) :to-match-regex (compile-regex pattern)))
 
 (it-each (("alnum" #\A #\-) ("alpha" #\A #\1) ("ascii" #.(code-char 0) #.(code-char #x80))
           ("blank" #\Tab #\Newline) ("cntrl" #.(code-char 0) #\A) ("digit" #\1 #\A)
@@ -94,27 +93,27 @@
 
 (it "treats backslash-b inside a character class as backspace"
   (let ((regex (compile-regex "[\\b]")))
-    (expect (is-match-p regex (string (code-char 8))) :to-be-truthy)
-    (expect (is-match-p regex "b") :to-be-falsy)))
+    (expect (string (code-char 8)) :to-match-regex regex)
+    (expect-not "b" :to-match-regex regex)))
 
 (it "accepts empty character classes as empty sets"
   (let ((regex (compile-regex "[]")))
-    (expect (is-match-p regex "") :to-be-falsy)
-    (expect (is-match-p regex "a") :to-be-falsy))
+    (expect-not "" :to-match-regex regex)
+    (expect-not "a" :to-match-regex regex))
   (let ((regex (compile-regex "[^]")))
-    (expect (is-match-p regex "") :to-be-falsy)
-    (expect (is-match-p regex "a") :to-be-truthy))
+    (expect-not "" :to-match-regex regex)
+    (expect "a" :to-match-regex regex))
   (let ((empty (make-array 0 :element-type '(unsigned-byte 8)))
         (a (make-array 1 :element-type '(unsigned-byte 8)
                           :initial-contents '(97))))
     (let ((regex (compile-byte-regex "[]")))
-      (expect (is-match-p regex empty) :to-be-falsy)
-      (expect (is-match-p regex a) :to-be-falsy))
+      (expect-not empty :to-match-regex regex)
+      (expect-not a :to-match-regex regex))
     (let ((regex (compile-byte-regex "[^]")))
-      (expect (is-match-p regex empty) :to-be-falsy)
-      (expect (is-match-p regex a) :to-be-truthy)))
+      (expect-not empty :to-match-regex regex)
+      (expect a :to-match-regex regex)))
   (let ((regex (compile-regex "[[a]&&[]]")))
-    (expect (is-match-p regex "a") :to-be-falsy)))
+    (expect-not "a" :to-match-regex regex)))
 
 (it "validates capture-name characters and parser flags"
   (expect (cl-regex-kit::capture-name-start-p #\a) :to-be-truthy)
