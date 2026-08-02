@@ -98,6 +98,5 @@ position, retaining the usual branch priority to resolve equal-length paths."
                         (setf blocking-p t)
                         (push
                           (make-vm-thread :pc (inst-b instruction) :slots (vm-thread-slots thread))
-                          (aref pending (- next-position start)))))))))
-            finally
-            (return best-result)))))))
+                          (aref pending (- next-position start))))))))))
+              finally (return best-result))))))

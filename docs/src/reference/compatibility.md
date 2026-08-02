@@ -55,7 +55,8 @@ supports.
   `split-inclusive`, and `split-n`, and
   first, bounded, and all replacement through `replace-first`, `replace-n`,
   and `replace-all`, with Rust-style capture templates (`$0`, `$name`,
-  `${name}`, and `$$`)
+  `${name}`, and `$$`) by default, and cl-ppcre-style templates (`\1`, `\&`,
+  `\{name}`, and `\\`) through `:template-syntax :backslash`
 - RE2/Rust-style multi-pattern matching through `compile-regex-set`,
   `regex-set-count`, `regex-set-empty-p`, `regex-set-matches`,
   `regex-set-matches-at`, `regex-set-matches-into`, `regex-set-match-p`, and
@@ -112,6 +113,18 @@ express. Supporting it means falling back to backtracking for the whole
 pattern, which reintroduces the exponential worst case this engine exists to
 avoid.
 
+This restriction is about backreferences *in a pattern*. It says nothing
+about `\1` in a *replacement template*, which is an ordinary
+substitution and costs the engine nothing; see
+[replacement templates](#replacement-templates) below.
+
+Note that `\1` in a pattern is not rejected: with the default `:octal t`, it
+parses as the octal escape for U+0001. A caller that accepts patterns
+written for a backreference-supporting engine should pass `:octal nil`, which
+makes `\1` through `\7` signal `regex-syntax-error` instead of silently
+matching a control character. `\8` and `\9` always signal, since no octal
+reading exists for them.
+
 ### Lookaround
 
 Lookahead and lookbehind are not part of the supported RE2/Rust-compatible
@@ -131,6 +144,30 @@ If a project needs backreferences or lookaround, a backtracking
 engine such as [cl-ppcre](https://edicl.github.io/cl-ppcre/) is the
 appropriate tool -- and not a defect in either design, just a different point
 on the same trade-off.
+
+## Replacement templates
+
+Replacement templates are independent of the matching engine, so this is one
+place where cl-ppcre compatibility *is* available. `replace-first`,
+`replace-n`, and `replace-all` take a `:template-syntax` argument:
+
+- `:dollar` (the default) is the Rust-style dialect: `$1`, `$name`,
+  `${name}`, `$$`.
+- `:backslash` is the cl-ppcre-style dialect: `\1`, `\&`, `\{name}`, `\\`.
+
+The default has not changed and will not change; `:backslash` is opt-in per
+call. This matters for a caller that exposes replacement templates to *its*
+own users -- a `.tmux.conf` `#{s/pattern/replacement/}` modifier, say -- where
+the users have written `\1` and expect it to mean the first capture. Under
+`:dollar` such a template is emitted verbatim with no error, which is why the
+dialect is a deliberate choice at the call site rather than a guess made from
+the template's contents.
+
+`:backslash` reproduces `cl-ppcre:regex-replace-all` for every template
+cl-ppcre accepts. It additionally accepts `\0`, out-of-range group numbers,
+and `\{name}`, all of which cl-ppcre rejects; it does not implement
+cl-ppcre's `` \` `` and `\'` prematch/postmatch aliases. The
+[API reference](api.md) tabulates each case.
 
 ## Current differences
 

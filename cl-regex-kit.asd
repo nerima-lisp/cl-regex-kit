@@ -86,6 +86,7 @@
     (:file "api-properties-test")
     (:file "api-options-test")
     (:file "api-operations-test")
+    (:file "api-replace-test")
     (:file "cli-test"))
   :perform (test-op
     (operation component)
