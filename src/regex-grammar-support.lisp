@@ -24,8 +24,7 @@ used only to locate FAIL's caret when no more specific offset applies."
 (defun skip-extended-trivia (position)
   "Advance POSITION past whitespace and `#`-comments when the live extended
 flag is set -- the token-stream analogue of SKIP-EXTENDED-SYNTAX."
-  (if (not (logtest +flag-extended+ *regex-flags*)) position
-    (let ((tokens *regex-tokens*)
+  (if (logtest +flag-extended+ *regex-flags*) (let ((tokens *regex-tokens*)
           (length (length *regex-tokens*)))
       (loop (loop while (and (< position length) (regex-whitespace-token-p (aref tokens position)))
               do (incf position)) (if (and (< position length) (regex-comment-start-token-p (aref tokens position))) (progn
@@ -33,7 +32,7 @@ flag is set -- the token-stream analogue of SKIP-EXTENDED-SYNTAX."
                   do (incf position))
             (when (< position length)
               (incf position)))
-          (return position))))))
+          (return position)))) position))
 
 (defun at-end-p ()
   (>= (skip-extended-trivia *regex-token-position*) (length *regex-tokens*)))

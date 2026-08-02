@@ -209,18 +209,14 @@ name is not an error: `\\b{2}` is a repeated bare word-boundary, so a `{`
 with no alphabetic-or-hyphen name behind it must be left completely
 unconsumed for the quantifier grammar to see -- simply not taking the
 :LBRACE token accomplishes exactly that, with no position to rewind."
-  (if (not (peek-type :lbrace)) :word-boundary
-    (let ((saved *regex-token-position*)
+  (if (peek-type :lbrace) (let ((saved *regex-token-position*)
           (name-characters nil))
       (take-token)
       (loop while (and
           (peek-type :char)
           (or (ascii-alphabetic-p (peek-value)) (char= (peek-value) #\-)))
             do (push (token-value (take-token)) name-characters))
-      (if (null name-characters) (progn
-          (setf *regex-token-position* saved)
-          :word-boundary)
-        (let ((name (coerce (nreverse name-characters) 'string)))
+      (if name-characters (let ((name (coerce (nreverse name-characters) 'string)))
           (unless (closing-brace-p (peek-token))
             (fail "Unclosed word boundary"))
           (take-token)
@@ -229,7 +225,9 @@ unconsumed for the quantifier grammar to see -- simply not taking the
             ((string= name "end") :word-end)
             ((string= name "start-half") :word-start-half)
             ((string= name "end-half") :word-end-half)
-            (t (fail "Unknown word boundary"))))))))
+            (t (fail "Unknown word boundary")))) (progn
+          (setf *regex-token-position* saved)
+          :word-boundary))) :word-boundary))
 
 (defun collect-braced-hex ()
   "Collect the hex digits of a `\\x{...}`/`\\u{...}`/`\\U{...}` escape after
@@ -242,7 +240,7 @@ parser's PARSE-BRACED-HEX-CODE (built on the same PEEK-based skipping) did."
         (digits nil))
     (loop while (and (peek-type :char) (digit-char-p (peek-value) 16))
           do (push (token-value (take-token)) digits))
-    (when (null digits)
+    (unless digits
       (fail "Expected hexadecimal escape digits" beginning))
     (unless (closing-brace-p (peek-token))
       (fail "Unclosed Unicode escape" beginning))
@@ -347,8 +345,7 @@ parser's PARSE-BRACED-HEX-CODE (built on the same PEEK-based skipping) did."
   (let ((branches (list (parse-concatenation))))
     (loop while (peek-type :pipe)
           do (take-token) (push (parse-concatenation) branches))
-    (if (null (cdr branches)) (car branches)
-      (make-instance 'alternation-node :branches (nreverse branches)))))
+    (if (cdr branches) (make-instance 'alternation-node :branches (nreverse branches)) (car branches))))
 
 (defun parse-regex (pattern
     &key

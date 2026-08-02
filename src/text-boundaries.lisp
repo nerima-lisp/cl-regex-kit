@@ -51,7 +51,7 @@ differs, which is exactly what COMPUTE-NEIGHBORS captures."
   byte-word
   (text position)
   (values
-    (byte-word-character-p (and (> position 0) (aref text (1- position))))
+    (byte-word-character-p (and (plusp position) (aref text (1- position))))
     (byte-word-character-p (and (< position (length text)) (aref text position)))
     t))
 
@@ -66,7 +66,7 @@ Returns CHARACTER, the exclusive end index, and true; otherwise three NILs."
       (let ((first (aref text position)))
         (cond
           ((<= first #x7f) (values (code-char first) (1+ position) t))
-          ((and (<= #xc2 first #xdf) (< (+ position 1) length))
+          ((and (<= #xc2 first #xdf) (< (1+ position) length))
             (let ((second (aref text (1+ position))))
               (when (utf8-continuation-octet-p second)
                 (values
@@ -120,12 +120,12 @@ Returns CHARACTER, the exclusive end index, and true; otherwise three NILs."
 (defun byte-unicode-non-boundary-position-p (text position)
   "Return true when Unicode \\B can evaluate without splitting UTF-8."
   (and
-    (or (= position 0) (nth-value 2 (utf8-character-before text position)))
+    (or (zerop position) (nth-value 2 (utf8-character-before text position)))
     (or (= position (length text)) (nth-value 2 (utf8-character-at text position)))))
 
 (defun byte-unicode-boundary-characters (text position)
   "Return surrounding Unicode characters and whether POSITION is a UTF-8 boundary."
-  (multiple-value-bind (left ignored-left valid-left) (if (= position 0) (values nil nil nil)
+  (multiple-value-bind (left ignored-left valid-left) (if (zerop position) (values nil nil nil)
       (utf8-character-before text position))
     (declare (ignore ignored-left valid-left))
     (multiple-value-bind (right ignored-right valid-right) (if (= position (length text)) (values nil nil nil)
@@ -148,11 +148,11 @@ Returns CHARACTER, the exclusive end index, and true; otherwise three NILs."
   (let ((terminator (char-code line-terminator)))
     (if crlf-p (or
         (and
-          (> position 0)
+          (plusp position)
           (= (aref text (1- position)) #x0d)
           (or (= position (length text)) (/= (aref text position) #x0a)))
-        (and (> position 0) (= (aref text (1- position)) #x0a)))
-      (and (> position 0) (= (aref text (1- position)) terminator)))))
+        (and (plusp position) (= (aref text (1- position)) #x0a)))
+      (and (plusp position) (= (aref text (1- position)) terminator)))))
 
 (defun byte-line-end-p (text position crlf-p line-terminator)
   (let ((terminator (char-code line-terminator)))
@@ -161,7 +161,7 @@ Returns CHARACTER, the exclusive end index, and true; otherwise three NILs."
         (and
           (< position (length text))
           (= (aref text position) #x0a)
-          (or (= position 0) (/= (aref text (1- position)) #x0d))))
+          (or (zerop position) (/= (aref text (1- position)) #x0d))))
       (and (< position (length text)) (= (aref text position) terminator)))))
 
 (progn
@@ -183,16 +183,16 @@ Returns CHARACTER, the exclusive end index, and true; otherwise three NILs."
               (member category (unicode-word-general-categories) :test (function eq))
               (member (char-code character) (quote (#x200c #x200d)))))
         (or
-          (and (char<= #\a character #\z))
-          (and (char<= #\A character #\Z))
-          (and (char<= #\0 character #\9))
+          (char<= #\a character #\z)
+          (char<= #\A character #\Z)
+          (char<= #\0 character #\9)
           (char= character #\_))))))
 
 (define-boundary-predicates
   word
   (text position unicode-p)
   (values
-    (word-character-p (and (> position 0) (char text (1- position))) unicode-p)
+    (word-character-p (and (plusp position) (char text (1- position))) unicode-p)
     (word-character-p
       (and (< position (length text)) (char text position))
       unicode-p)
@@ -201,11 +201,11 @@ Returns CHARACTER, the exclusive end index, and true; otherwise three NILs."
 (defun line-start-p (text position crlf-p line-terminator)
   (if crlf-p (or
       (and
-        (> position 0)
+        (plusp position)
         (char= (char text (1- position)) #\Return)
         (or (= position (length text)) (not (char= (char text position) #\Newline))))
-      (and (> position 0) (char= (char text (1- position)) #\Newline)))
-    (and (> position 0) (char= (char text (1- position)) line-terminator))))
+      (and (plusp position) (char= (char text (1- position)) #\Newline)))
+    (and (plusp position) (char= (char text (1- position)) line-terminator))))
 
 (defun line-end-p (text position crlf-p line-terminator)
   (if crlf-p (or
@@ -213,5 +213,5 @@ Returns CHARACTER, the exclusive end index, and true; otherwise three NILs."
       (and
         (< position (length text))
         (char= (char text position) #\Newline)
-        (or (= position 0) (not (char= (char text (1- position)) #\Return)))))
+        (or (zerop position) (not (char= (char text (1- position)) #\Return)))))
     (and (< position (length text)) (char= (char text position) line-terminator))))

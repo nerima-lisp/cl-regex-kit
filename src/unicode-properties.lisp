@@ -172,9 +172,9 @@
 (defun ascii-hex-digit-p (character)
   "Return true when CHARACTER is an ASCII hexadecimal digit."
   (or
-    (and (char<= #\0 character #\9))
-    (and (char<= #\a character #\f))
-    (and (char<= #\A character #\F))))
+    (char<= #\0 character #\9)
+    (char<= #\a character #\f)
+    (char<= #\A character #\F)))
 
 (defun join-control-p (character)
   "Return true when CHARACTER is U+200C or U+200D."

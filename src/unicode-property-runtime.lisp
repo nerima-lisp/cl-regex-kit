@@ -21,7 +21,7 @@
           ((> code upper)
             (setf low (1+ middle)))
           (t (return t)))
-            finally (return nil)))))
+            finally (return)))))
 
 (defun unicode-property-descriptor-matches-p (descriptor character)
   (let ((kind (unicode-property-descriptor-kind descriptor))

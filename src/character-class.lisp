@@ -91,7 +91,7 @@ generated once here instead of once per domain."
 
 (defun ascii-fold-octet (octet)
   "Return OCTET folded to lower case when it is an ASCII letter."
-  (if (or (<= #x41 octet #x5a)) (+ octet #x20)
+  (if (<= #x41 octet #x5a) (+ octet #x20)
     octet))
 
 (defun octet-range-bound (bound)

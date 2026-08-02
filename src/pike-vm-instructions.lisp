@@ -20,7 +20,7 @@
       (let ((node (inst-a instruction)))
         (or
           (any-char-node-dotall-p node)
-          (if (characterp element) (if (any-char-node-crlf-p node) (and (not (char= element #\Return)) (not (char= element #\Newline)))
+          (if (characterp element) (if (any-char-node-crlf-p node) (not (or (char= element #\Return) (char= element #\Newline)))
               (not (char= element (any-char-node-line-terminator node))))
             (if (any-char-node-crlf-p node) (and (/= element #x0d) (/= element #x0a))
               (/= element (char-code (any-char-node-line-terminator node))))))))))
@@ -89,7 +89,7 @@
   (case (inst-op instruction)
     (:bol
       (or
-        (= position 0)
+        (zerop position)
         (and
           (logbitp 0 (or (inst-b instruction) 0))
           (funcall
@@ -111,7 +111,7 @@
             position
             (logbitp 2 (or (inst-b instruction) 0))
             (or (inst-c instruction) #\Newline)))))
-    (:bos (= position 0))
+    (:bos (zerop position))
     (:eos (= position length))
     (:boundary
       (vm-word-position-p

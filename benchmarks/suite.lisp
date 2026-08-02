@@ -8,14 +8,13 @@
 
 (defun environment-integer (name default)
   (let ((value (uiop:getenv name)))
-    (if (null value) default
-      (let ((parsed
+    (if value (let ((parsed
             (handler-case (parse-integer value)
               (parse-error ()
                 (error "~A must be a positive integer, got ~S" name value)))))
         (unless (plusp parsed)
           (error "~A must be a positive integer, got ~S" name value))
-        parsed))))
+        parsed) default)))
 
 (defun lcg-next (state)
   (mod (+ (* state 1664525) 1013904223) 4294967296))
