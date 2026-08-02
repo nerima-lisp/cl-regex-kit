@@ -80,7 +80,10 @@ inputs.cl-regex-kit = {
 ```
 
 Note the pinned tag. Consumers inside this org must pin a release tag rather
-than follow the default branch.
+than follow the default branch. On a `lispDependencies` edge, read
+`cl-regex-kit.packages.<system>.cl-regex-kit` -- `packages.default` is the
+`cl-regex-kit-grep` binary described under [Command Line](#command-line), not
+the ASDF system.
 
 Without Nix, put the repository where ASDF can find it and evaluate
 `(asdf:load-system "cl-regex-kit")`. The library depends on
@@ -92,7 +95,16 @@ optional command-line system needs
 ## Command Line
 
 The optional `cl-regex-kit/cli` ASDF system builds `cl-regex-kit-grep`, a small
-grep-compatible command that uses this engine directly:
+grep-compatible command that uses this engine directly. It is what this flake
+delivers as `packages.default`, so a bare `nix build` in a checkout produces
+it:
+
+```sh
+nix build              # -> ./result/bin/cl-regex-kit-grep
+./result/bin/cl-regex-kit-grep -n 'error|warning' application.log
+```
+
+Or, once it is on `PATH`:
 
 ```sh
 cl-regex-kit-grep -n 'error|warning' application.log
@@ -149,6 +161,7 @@ another host does not execute those checks.
 
 ```sh
 nix develop          # SBCL with CL_SOURCE_REGISTRY already set
+nix build            # -> ./result/bin/cl-regex-kit-grep
 nix run .#test       # run the test suite
 nix run .#benchmark  # run the benchmark suite with configurable defaults
 nix run .#coverage   # write an HTML coverage report to ./coverage/

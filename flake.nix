@@ -85,6 +85,46 @@
         license = lib.licenses.mit;
         platforms = lib.platforms.unix;
       };
+
+      # `cl-regex-kit/cli` delivered as a binary. Lifted out of `extraOutputs`
+      # into this `let` because `overrideOutputs` publishes it too, as
+      # `packages.default`/`apps.default`, so that a bare `nix build` in this
+      # checkout produces `./result/bin/cl-regex-kit-grep`. Same derivation
+      # from both call sites.
+      #
+      # `programPath` is not optional. It defaults to `lispSystem`, which is
+      # right only when the system name, its `:build-pathname` and its
+      # directory all coincide; `cl-regex-kit/cli` sets `:pathname "cli"` and
+      # `:build-pathname "cl-regex-kit-grep"`, and ASDF's `program-op` resolves
+      # the latter against the former, so the program is written to
+      # `cli/cl-regex-kit-grep` and nothing else finds it. Without this,
+      # `mkExecutable` looks for `$out/cl-regex-kit/cli` and fails the build
+      # outright (cl-nix-forge lib/batteries/app.nix, `resolvedProgramPath`).
+      grepExecutable =
+        ctx:
+        ctx.cl.mkExecutable {
+          programPath = "cli/cl-regex-kit-grep";
+          args = {
+            pname = "cl-regex-kit-grep";
+            lispSystem = "cl-regex-kit/cli";
+            version = ctx.cl.fromAsdSystem ./cl-regex-kit.asd;
+            src = ctx.cl.mkLispSource { root = ./.; };
+            # cl-regex-kit itself is a sibling lispDependencies edge, exactly
+            # like cl-parser-kit is for the main package below; cl-cli is
+            # the one new dependency this executable adds. `ctx.package`
+            # carries cl-parser-kit transitively -- `lispDerivation` resolves
+            # the registry through the whole closure -- so naming it here
+            # would be a duplicate, not an addition.
+            lispDependencies = [
+              ctx.package
+              cl-cli.packages.${ctx.system}.cl-cli
+            ];
+            meta = meta // {
+              description = "cl-regex-kit-grep: a small grep built directly on cl-regex-kit";
+              mainProgram = "cl-regex-kit-grep";
+            };
+          };
+        };
     in
     # `mkPackageFlake` spans systems -- it obtains a `pkgs` and its own
     # cl-nix-forge instance per entry in `systems` -- so the per-system `lib`
@@ -169,6 +209,24 @@
 
       devShellPackages = ctx: [ ctx.pkgs.perl ];
 
+      # `packages.default`/`apps.default` are the DELIVERED BINARY, so that a
+      # bare `nix build` in this checkout produces
+      # `./result/bin/cl-regex-kit-grep` and `nix run .` runs it, the same way
+      # it does in every other repository in the org that ships a command.
+      # `packages.cl-regex-kit` -- the entry a downstream `lispDependencies`
+      # edge reads, and what `overlays.default`'s attribute is named after --
+      # is untouched and still the library.
+      #
+      # Done here rather than through `mkPackageFlake`'s own `executable`
+      # argument, which computes the delivery's `args` from the LIBRARY's:
+      # `cl-regex-kit/cli` is a different ASDF system with a different
+      # dependency set (it adds cl-cli) and a `programPath` of its own, so it
+      # needs the full `mkExecutable` call that `grepExecutable` already is.
+      overrideOutputs = ctx: {
+        packages.default = grepExecutable ctx;
+        apps.default = ctx.cl.mkApp { drv = grepExecutable ctx; };
+      };
+
       # Granularity lives here, NOT in extra GitHub Actions jobs: `nix flake
       # check` evaluates each attribute as its own derivation, in parallel,
       # with build caching.
@@ -188,21 +246,20 @@
         {
           apps.benchmark = benchmark;
 
-          packages.cl-regex-kit-grep = ctx.cl.mkExecutable {
-            args = {
-              pname = "cl-regex-kit-grep";
-              lispSystem = "cl-regex-kit/cli";
-              version = ctx.cl.fromAsdSystem ./cl-regex-kit.asd;
-              src = ctx.cl.mkLispSource { root = ./.; };
-              # cl-regex-kit itself is a sibling lispDependencies edge, exactly
-              # like cl-parser-kit is for the main package above; cl-cli is
-              # the one new dependency this executable adds.
-              lispDependencies = [
-                ctx.package
-                cl-cli.packages.${ctx.system}.cl-cli
-              ];
-            };
-          };
+          # The NAMED spelling of what `overrideOutputs` also publishes as
+          # `packages.default`. Both are kept rather than collapsed into one:
+          # `nix build .#cl-regex-kit-grep` says which binary it builds, which
+          # a bare `nix build` cannot. Same derivation, so the duplicate costs
+          # nothing.
+          packages.cl-regex-kit-grep = grepExecutable ctx;
+
+          # The delivery is the only artifact here that ASDF's `program-op`
+          # actually writes a file for, and `mkExecutable` fails the build if
+          # that file is missing -- so putting it in `checks` is what makes a
+          # wrong `programPath` a red CI run rather than a broken output nobody
+          # builds. It was exactly that: this executable was unreachable from
+          # `nix flake check` and its `programPath` was wrong.
+          checks.cl-regex-kit-grep = grepExecutable ctx;
 
           checks.coverage = ctx.cl.mkCommandCheck {
             # `.enableCheck`, not `ctx.package`: the coverage run loads
