@@ -40,6 +40,20 @@ in `(?-u:...)` are encoded as UTF-8; use `\\xHH` or an octal escape for an exact
 raw byte. In those scopes, character classes reject non-ASCII literals and
 Unicode escapes that resolve to non-ASCII scalars.
 
+`split`, `split-terminator`, `split-inclusive`, and `split-n` split text on
+non-overlapping matches, mirroring Rust `Regex::split`/`splitn`. `replace-first`,
+`replace-n`, and `replace-all` substitute a template string or a function of
+`(match-result text)` at each match; `:template-syntax` selects between the
+default `:dollar` (Rust-style `$1`/`${name}`/`$$`) and `:backslash`
+(`cl-ppcre`-compatible `\1`/`\{name}`/`\&`/`\\`, for callers migrating from
+`cl-ppcre:regex-replace-all` or exposing templates to their own users).
+
+`compile-regex-set`/`compile-byte-regex-set` and the `regex-set`/`byte-regex-set`
+macros compile several patterns into one merged NFA for RE2/Rust-style
+multi-pattern matching: `regex-set-matches`, `regex-set-match-p`, and their
+`-at`/`-into` variants report which member patterns matched without
+compiling or scanning each one separately.
+
 ## Quick Start
 
 ```lisp

@@ -212,6 +212,7 @@
             drv = ctx.package.enableCheck;
             name = "cl-regex-kit-coverage";
             timeoutSeconds = 120;
+            killAfterSeconds = 30;
             nativeBuildInputs = [ ctx.pkgs.perl ];
             command = [
               "${ctx.pkgs.sbcl}/bin/sbcl"
