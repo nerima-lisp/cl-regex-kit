@@ -212,31 +212,31 @@ match Lisp strings, cannot represent an invalid one)."
                    :reason "Character regexes cannot match invalid UTF-8 bytes")))
       (finish-compiled-regex ast pattern byte-mode-p size-limit never-newline))))
 
-(defun compile-regex (pattern &key case-insensitive multi-line
-                                dot-matches-new-line swap-greed
-                                ignore-whitespace (unicode t) crlf
-                                literal never-capture never-newline
-                                (octal t)
-                                (line-terminator #\Newline)
-                                (size-limit +maximum-instruction-count+)
-                                (nest-limit +default-nest-limit+))
-  "Compile PATTERN for string matching with RE2/Rust-compatible options."
-  (%compile-pattern pattern nil case-insensitive multi-line dot-matches-new-line
-                     swap-greed ignore-whitespace unicode crlf literal never-capture
-                     never-newline octal line-terminator size-limit nest-limit))
+(defmacro define-pattern-compiler (name byte-mode-p domain-description)
+  "Define NAME as a COMPILE-REGEX-shaped entry point compiling PATTERN for
+DOMAIN-DESCRIPTION with RE2/Rust-compatible options, dispatching to
+%COMPILE-PATTERN with BYTE-MODE-P fixed to NIL or T.
 
-(defun compile-byte-regex (pattern &key case-insensitive multi-line
-                                     dot-matches-new-line swap-greed
-                                     ignore-whitespace (unicode t) crlf
-                                     literal never-capture never-newline
-                                     (octal t)
-                                     (line-terminator #\Newline)
-                                     (size-limit +maximum-instruction-count+)
-                                     (nest-limit +default-nest-limit+))
-  "Compile PATTERN for octet-vector matching with RE2/Rust-compatible options."
-  (%compile-pattern pattern t case-insensitive multi-line dot-matches-new-line
-                     swap-greed ignore-whitespace unicode crlf literal never-capture
-                     never-newline octal line-terminator size-limit nest-limit))
+COMPILE-REGEX and COMPILE-BYTE-REGEX share every keyword argument and
+default; the only difference between them is BYTE-MODE-P and their
+docstring's domain. Generating both from one specification keeps that
+12-keyword lambda list as a single source of truth: a new compilation
+option only needs adding here, not once per domain."
+  `(defun ,name (pattern &key case-insensitive multi-line
+                          dot-matches-new-line swap-greed
+                          ignore-whitespace (unicode t) crlf
+                          literal never-capture never-newline
+                          (octal t)
+                          (line-terminator #\Newline)
+                          (size-limit +maximum-instruction-count+)
+                          (nest-limit +default-nest-limit+))
+     ,(format nil "Compile PATTERN for ~A with RE2/Rust-compatible options." domain-description)
+     (%compile-pattern pattern ,byte-mode-p case-insensitive multi-line dot-matches-new-line
+                        swap-greed ignore-whitespace unicode crlf literal never-capture
+                        never-newline octal line-terminator size-limit nest-limit)))
+
+(define-pattern-compiler compile-regex nil "string matching")
+(define-pattern-compiler compile-byte-regex t "octet-vector matching")
 
 (defun regex-capture-names (regex)
   "Return a fresh vector of capture names indexed by capture group."
