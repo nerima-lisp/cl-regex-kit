@@ -27,7 +27,7 @@
     };
 
     cl-weave = {
-      url = "github:nerima-lisp/cl-weave/v1.1.4";
+      url = "github:nerima-lisp/cl-weave/v1.2.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -37,7 +37,7 @@
     # `cl-regex-kit/test` -- see `lispDependencies` below and
     # `cl-regex-kit.asd`'s `:depends-on`.
     cl-parser-kit = {
-      url = "github:nerima-lisp/cl-parser-kit/v1.0.3";
+      url = "github:nerima-lisp/cl-parser-kit/v1.1.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -45,7 +45,7 @@
     # executable -- depends on it directly for argument parsing, with no
     # adapter layer.
     cl-cli = {
-      url = "github:nerima-lisp/cl-cli/v1.2.0";
+      url = "github:nerima-lisp/cl-cli/v1.3.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
