@@ -87,54 +87,64 @@
     (unless seen-p
       (fail "Expected inline flags"))))
 
+(defun parse-group-prefix ()
+  "Parse and consume the optional `?...` group-introducer just after
+PARSE-GROUP's opening `(`. Returns (values CAPTURING-P NAME SCOPED-FLAGS
+BARE-FLAGS-P):
+
+- Plain `(...)`: CAPTURING-P follows *REGEX-NEVER-CAPTURE-P*, everything
+  else NIL.
+- `(?:...)`: CAPTURING-P NIL.
+- `(?<name>...)`/`(?P<name>...)`: NAME set, CAPTURING-P T.
+- `(?flags:...)`: CAPTURING-P NIL, SCOPED-FLAGS holds the pre-group flags to
+  restore once the group closes, per PARSE-GROUP.
+- `(?flags)`: BARE-FLAGS-P T. *REGEX-FLAGS* is already updated and the group
+  closes with no child expression -- PARSE-GROUP must return (MAKE-CONCAT
+  NIL) directly rather than parsing a body."
+  (let ((capturing-p (not *regex-never-capture-p*))
+        (name nil)
+        (scoped-flags nil))
+    (when (peek-type :question)
+      (take-token)
+      (if (and (peek-type :char) (member (peek-value) '(#\: #\< #\P)))
+          (case (peek-value)
+            (#\: (take-token) (setf capturing-p nil))
+            (#\< (take-token) (setf name (read-group-name) capturing-p t))
+            (#\P
+              (take-token)
+              (unless (and (peek-type :char) (char= (peek-value) #\<))
+                (fail "Expected < after ?P"))
+              (take-token)
+              (setf name (read-group-name) capturing-p t)))
+          (let ((saved-flags *regex-flags*))
+            (parse-flags)
+            (cond
+              ((peek-type :rparen)
+                (take-token)
+                (return-from parse-group-prefix (values capturing-p name nil t)))
+              ((and (peek-type :char) (char= (peek-value) #\:))
+                (take-token)
+                (setf capturing-p nil scoped-flags saved-flags))
+              (t (fail "Expected : or ) after inline flags"))))))
+    (values capturing-p name scoped-flags nil)))
+
 (defun parse-group ()
   (take-token)
   (with-parser-nesting
     (*regex-nesting-depth*
       *regex-nest-limit*
       (fail "Regular expression exceeds the configured nesting limit"))
-    (block parse-group
-      (let ((capture-index nil)
-            (name nil)
-            (capturing-p (not *regex-never-capture-p*))
-            (scoped-flags-p nil))
-        (when (peek-type :question)
-          (take-token)
-          (if (and (peek-type :char) (member (peek-value) '(#\: #\< #\P))) (case (peek-value)
-              (#\:
-                (take-token)
-                (setf capturing-p nil))
-              (#\<
-                (take-token)
-                (setf name (read-group-name)
-                      capturing-p t))
-              (#\P
-                (take-token)
-                (unless (and (peek-type :char) (char= (peek-value) #\<))
-                  (fail "Expected < after ?P"))
-                (take-token)
-                (setf name (read-group-name)
-                      capturing-p t)))
-            (let ((saved-flags *regex-flags*))
-              (parse-flags)
-              (cond
-                ((peek-type :rparen)
-                  (take-token)
-                  (return-from parse-group (make-concat nil)))
-                ((and (peek-type :char) (char= (peek-value) #\:))
-                  (take-token)
-                  (setf capturing-p nil
-                        scoped-flags-p saved-flags))
-                (t (fail "Expected : or ) after inline flags"))))))
-        (when capturing-p
-          (setf capture-index (incf *regex-group-count*)))
-        (let ((child (parse-alternation)))
-          (unless (peek-type :rparen)
-            (fail "Unclosed group"))
-          (take-token)
-          (when scoped-flags-p
-            (setf *regex-flags* scoped-flags-p))
-          (make-instance 'group-node :child child :capture-index capture-index :name name))))))
+    (multiple-value-bind (capturing-p name scoped-flags bare-flags-p) (parse-group-prefix)
+      (if bare-flags-p
+          (make-concat nil)
+          (let ((capture-index (when capturing-p (incf *regex-group-count*)))
+                (child (parse-alternation)))
+            (unless (peek-type :rparen)
+              (fail "Unclosed group"))
+            (take-token)
+            (when scoped-flags
+              (setf *regex-flags* scoped-flags))
+            (make-instance 'group-node :child child :capture-index capture-index :name name))))))
 
 (defun parse-atom ()
   (when (at-end-p)
