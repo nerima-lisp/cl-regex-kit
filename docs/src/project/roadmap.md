@@ -37,6 +37,35 @@ non-overlapping results while safely advancing through zero-length matches.
 See [Compatibility](../reference/compatibility.md): backreferences and lookaround
 are not planned, by design.
 
+## Known gaps
+
+- **Coverage sits below the 100%/100% gate** (95.63% expression / 93.38%
+  branch as of this writing). Most of the remaining gap is `sb-cover` not
+  crediting `in-package`, value-less `defvar`/`defconstant`,
+  `defmacro`/`defclass` bodies, `defparameter` data literals, or `&key`
+  defaults as "executed" regardless of how thoroughly the surrounding file
+  is exercised -- confirmed by `scan`'s `(start 0)` default still showing
+  uncovered even though several different test files already call it
+  without `:start`. A remaining, likely-unreachable branch is
+  `ensure-byte-character`'s own `> #xff` check in
+  regex-grammar-support.lisp: every call site that reaches it
+  (`ensure-byte-class-character`, `range`) either already rejects a
+  non-raw-octet character above `#x7f` first, or only ever passes bounds
+  that are structurally `<= #xff` (`\xHH` and `\ooo` escapes cannot
+  produce a larger value); no pattern syntax was found that reaches it
+  with a larger, raw-octet value.
+- **`checks.benchmark` fails independent of any of this branch's own
+  changes**: `nix flake check`'s `mkTestApp`-driven build of the benchmark
+  app compiles `run-benchmarks.lisp` against a read-only Nix store
+  checkout and gets `SB-INT:SIMPLE-FILE-ERROR "Permission denied"`
+  writing a fasl beside the source, reproduced identically against the
+  script's unmodified, pre-refactor form. An ASDF output-translations
+  redirect (scoped to the checkout's own subtree, `:inherit-configuration`
+  for everything else) did not resolve it and was not kept; whatever
+  `mkTestApp`'s own fasl-cache wiring assumes about its build environment
+  needs its own investigation, most likely in `cl-nix-forge` rather than
+  in this repository.
+
 ## Future extensions
 
 - Additional regular-expression syntax where it preserves the finite-automaton
