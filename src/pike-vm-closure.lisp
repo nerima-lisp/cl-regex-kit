@@ -22,6 +22,7 @@
       (values marks (pike-vm-closure-workspace-generation workspace))))
   (defun pike-vm-closure (program text position length byte-mode-p seeds &key workspace)
     "Compute a capture-aware epsilon closure for SEEDS at POSITION."
+    (declare (type simple-vector program))
     (let ((workspace (or workspace (make-pike-vm-closure-workspace (length program))))
           (head (list nil))
           (tail nil))
@@ -61,6 +62,7 @@
           (cdr head)))))
   (defun pike-vm-set-closure (program text position length byte-mode-p seeds &key workspace)
     "Compute an integer-PC epsilon closure for SEEDS at POSITION."
+    (declare (type simple-vector program))
     (let ((workspace (or workspace (make-pike-vm-closure-workspace (length program))))
           (head (list nil))
           (tail nil))

@@ -6,6 +6,7 @@
   group-names)
 
 (defun slot-count-for-program (program)
+  (declare (type simple-vector program))
   (loop for instruction across program
         when (eq (inst-op instruction) :save)
           maximize (1+ (inst-a instruction)) into maximum
@@ -27,6 +28,7 @@ When SHORTEST-P is true, select the earliest ending match at the leftmost
 start position instead of applying the usual greedy/lazy branch priority.
 When LONGEST-P is true, select the longest match at the leftmost start
 position, retaining the usual branch priority to resolve equal-length paths."
+  (declare (type simple-vector program))
   (when (and shortest-p longest-p)
     (error "SHORTEST-P and LONGEST-P cannot both be true"))
   (check-type never-newline-p boolean)

@@ -10,6 +10,7 @@
     never-newline-p
     (matches nil matches-supplied-p))
   "Run merged PROGRAM once and return matching pattern indexes.\n\nWhen STOP-AT-FIRST-MATCH-P is true, return true as soon as any member matches.\nOtherwise return all matching indexes in source order. PROGRAM is produced by\nMERGE-NFA-PROGRAMS. Set matching carries only integer program counters."
+  (declare (type simple-vector program))
   (check-type never-newline-p boolean)
   (when (and
       matches-supplied-p

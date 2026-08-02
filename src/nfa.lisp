@@ -210,4 +210,10 @@ without changing the immutable AST nodes referenced by consuming instructions."
     (patch (out begin :b) (fragment-start body))
     (patch (fragment-outs body) end)
     (patch (out end :b) match)
-    (values *nfa-instructions* group-count)))
+    ;; *NFA-INSTRUCTIONS* is adjustable/fill-pointered to support
+    ;; VECTOR-PUSH-EXTEND during construction, but every reader of a REGEX's
+    ;; PROGRAM (the Pike VM's per-instruction, per-character AREF in
+    ;; pike-vm-closure.lisp/pike-vm-capture.lisp/pike-vm-set.lisp) is
+    ;; read-only from here on -- coercing once to a SIMPLE-VECTOR removes
+    ;; that indirection from the hottest AREF in the engine.
+    (values (coerce *nfa-instructions* 'simple-vector) group-count)))
