@@ -11,8 +11,14 @@ src/
                   Unicode property aliases and static range tables
   unicode-extra-binary-property-data.lisp
                   Generated regex-syntax UCD property_bool.rs range table
+  unicode-age-data-1.lisp
+  unicode-age-data-2.lisp
+  unicode-age-data-3.lisp
+                  Generated Unicode Age range table, split across three
+                  files purely to keep any one file's line count down
   unicode-age-data.lisp
-                  Generated Unicode Age range table
+                  Appends the three parts above into +UNICODE-AGE-RANGES+,
+                  the single list every consumer expects
   unicode-binary-property-range-data.lisp
                   Unicode binary-property name lists, value aliases, and
                   code-point range tables (DECODE-CODE-POINT-RANGES and
@@ -115,15 +121,27 @@ matcher, keeping property additions reviewable without duplicating control
 flow. `unicode-case-folding-data.lisp` owns the generated Unicode simple
 case-folding table.
 
-These four data files are the largest in `src/` by line count -- their size
-is upstream Unicode's, not this engine's, and splitting a generated,
-alphabetically/numerically monotonic lookup table into arbitrary chunks would
-add ASDF components and load-order bookkeeping without making any one chunk
-easier to read than the whole. `unicode-extra-binary-property-data.lisp` and
-`unicode-age-data.lisp` are marked "generated ... do not edit manually" for
-the same reason DECODE-CODE-POINT-RANGES's compact range-string format exists
-in `unicode-binary-property-range-data.lisp`: a hand-applied structural
-change to any of them would silently diverge from the next regeneration.
+These are the largest data files in `src/` by line count -- their size is
+upstream Unicode's, not this engine's. `unicode-extra-binary-property-data.lisp`
+and the `unicode-age-data-*.lisp` files are marked "generated ... do not edit
+manually" for the same reason DECODE-CODE-POINT-RANGES's compact range-string
+format exists in `unicode-binary-property-range-data.lisp`: a hand-applied
+*structural* change to any of them would silently diverge from the next
+regeneration. `+UNICODE-AGE-RANGES+`'s top-level shape -- an
+association list keyed by independent Unicode version strings ("V10_0",
+"V11_0", ...) -- has a regeneration-compatible split boundary along those
+keys, though: `unicode-age-data-1.lisp` through `-3.lisp` hold disjoint
+groups of whole version entries, byte-for-byte identical to the
+corresponding span of the original single file, and `unicode-age-data.lisp`
+appends them back into the one list every consumer expects. A future
+regenerator only needs to know to emit three files along that same boundary
+instead of one.
+
+`unicode-case-folding-data.lisp`'s shape doesn't offer an equivalent
+boundary -- it is one flat, monotonically-ordered `code-point -> fold-targets`
+table with no independent groupings to split along -- so it stays one file;
+an arbitrary line-count-based cut through it would not track any
+regeneration-meaningful boundary the way the age-range split does.
 
 `character-class.lisp` consumes that data for class
 composition, case folding, and boundary predicates -- its own five-shape

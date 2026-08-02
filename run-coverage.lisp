@@ -37,6 +37,9 @@
 (defparameter +generated-source-file-names+ (quote
     ("package"
       "unicode-age-data"
+      "unicode-age-data-1"
+      "unicode-age-data-2"
+      "unicode-age-data-3"
       "unicode-binary-property-range-data"
       "unicode-case-folding-data"
       "unicode-extra-binary-property-data"
