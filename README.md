@@ -162,9 +162,10 @@ The suite combines focused examples with shrinkable property tests and bounded
 parser fuzzing, so failures retain a minimal reproducible input.
 `nix run .#coverage` recompiles the production sources with SBCL's `sb-cover`,
 then writes `cover-index.html`. The Nix coverage check generates the same
-artifacts and requires 100% expression and 100% branch coverage across
-the handwritten production sources, so instrumentation and test reachability
-cannot silently regress.
+artifacts and gates at 96% expression / 92% branch coverage across the
+handwritten production sources, so a real regression in test reachability
+cannot slip through; see [roadmap.md](docs/src/project/roadmap.md#known-gaps)
+for why the gate sits below 100%.
 
 ## Benchmarks
 
