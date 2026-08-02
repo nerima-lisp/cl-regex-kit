@@ -25,7 +25,10 @@
    #:regex-set-count #:regex-set-empty-p
    #:regex-set-matches #:regex-set-matches-at #:regex-set-matches-into
    #:regex-set-match-p #:regex-set-match-at-p
-   #:regex-syntax-error #:regex-timeout)
+   #:cl-regex-kit-error
+   #:regex-syntax-error #:regex-syntax-error-pattern #:regex-syntax-error-position
+   #:regex-syntax-error-reason
+   #:regex-timeout #:regex-timeout-seconds)
   (:export #:run-tests))
 
 (in-package #:cl-regex-kit/test)

@@ -154,7 +154,11 @@
         (unicode-runtime-property-names :category))))
 
   (defun extra-binary-property-ranges (name)
-    (cdr (assoc name +unicode-extra-binary-property-ranges+ :test (function string=)))))
+    (let ((canonical
+          (or
+            (cdr (assoc name +unicode-extra-binary-property-aliases+ :test (function string=)))
+            name)))
+      (cdr (assoc canonical +unicode-extra-binary-property-ranges+ :test (function string=))))))
 
 (defun resolve-unicode-property (name)
   (let* ((raw-name (string-upcase name))

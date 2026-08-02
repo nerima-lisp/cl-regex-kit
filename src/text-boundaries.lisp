@@ -174,19 +174,25 @@ Returns CHARACTER, the exclusive end index, and true; otherwise three NILs."
                (quote ("MN" "MC" "ME" "ND" "PC"))))))
 
   (defun word-character-p (character unicode-p)
+    "Return exactly T or NIL -- never MEMBER's matching-tail cons -- so
+DEFINE-BOUNDARY-PREDICATES's generated BOUNDARY-P, which compares this
+function's result across two positions with EQ, does not see two
+otherwise-equal word-character classifications as different objects."
     (and
       character
-      (if unicode-p
-          (let ((category (sb-unicode:general-category character)))
+      (not
+        (null
+          (if unicode-p
+              (let ((category (sb-unicode:general-category character)))
+                (or
+                  (sb-unicode:alphabetic-p character)
+                  (member category (unicode-word-general-categories) :test (function eq))
+                  (member (char-code character) (quote (#x200c #x200d)))))
             (or
-              (sb-unicode:alphabetic-p character)
-              (member category (unicode-word-general-categories) :test (function eq))
-              (member (char-code character) (quote (#x200c #x200d)))))
-        (or
-          (char<= #\a character #\z)
-          (char<= #\A character #\Z)
-          (char<= #\0 character #\9)
-          (char= character #\_))))))
+              (char<= #\a character #\z)
+              (char<= #\A character #\Z)
+              (char<= #\0 character #\9)
+              (char= character #\_))))))))
 
 (define-boundary-predicates
   word
