@@ -14,6 +14,7 @@
    #:full-match
    #:split #:split-terminator #:split-inclusive #:split-n #:replace-first #:replace-all #:replace-n
    #:match-start #:match-end #:match-string
+   #:match-result-p
    #:match-captures
    #:match-group-start #:match-group-end #:match-group-string
    #:regex-capture-locations #:capture-locations-count

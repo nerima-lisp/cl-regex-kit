@@ -276,7 +276,7 @@
             nil
             (list (cl-regex-kit::make-vm-thread :pc 0 :slots slots))))
            (set-closure (cl-regex-kit::pike-vm-set-closure program "" 7 7 nil (list 0))))
-      (expect (mapcar (function cl-regex-kit::vm-thread-pc) capture) (quote (2 3)))
+      (expect (mapcar (function cl-regex-kit::vm-thread-pc) capture) :to-equal (quote (2 3)))
       (expect set-closure :to-equal (quote (2 3)))
       (expect (eq (cl-regex-kit::vm-thread-slots (first capture)) slots) :to-be nil)
       (expect
@@ -311,8 +311,8 @@
          (result (scan regex "aa")))
     (expect (match-start result) :to-equal 0)
     (expect (match-end result) :to-equal 2)
-    (expect (match-group result 1) :to-equal "aa")
-    (expect (match-group result 2) :to-be-null))
+    (expect (match-group-string result 1 "aa") :to-equal "aa")
+    (expect (match-group-string result 2 "aa") :to-be-null))
   (let ((regex (compile-regex "a|aaa")))
     (expect (shortest-match regex "aaa") :to-equal 1)
     (expect (match-end (longest-match regex "aaa")) :to-equal 3)))
@@ -327,7 +327,7 @@
 (it
   "handles empty, multiline, and bounded UTF-8 regex sets"
   (let ((set (compile-regex-set nil)))
-    (expect (regex-set-pattern-count set) :to-equal 0)
+    (expect (regex-set-count set) :to-equal 0)
     (expect (regex-set-matches set "anything") :to-equal nil)
     (expect (regex-set-match-p set "anything") :to-be nil))
   (let ((set (compile-regex-set (quote ("^b$" "^z$")) :multi-line t)))
