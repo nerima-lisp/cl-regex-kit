@@ -49,20 +49,3 @@ jobs:
       # Catches stray conflict markers and whitespace errors that compile fine.
       - name: Check diff hygiene
         run: git diff --check
-
-      # TEMPORARY: upload the raw sb-cover HTML report regardless of pass/fail
-      # so an in-progress coverage-gap investigation can inspect exactly which
-      # lines/branches are uncovered without a Nix store path to hand. Revert
-      # once expression/branch coverage is back at 100%; checks.coverage above
-      # already re-derives this same report as part of the real gate.
-      - name: Generate coverage report artifact
-        if: always()
-        run: nix develop --command sbcl --script run-coverage.lisp
-        continue-on-error: true
-      - name: Upload coverage report artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report
-          path: coverage/
-          retention-days: 3
