@@ -113,7 +113,19 @@ Range-defined binary properties are declared as alias-to-range entries
 (`DEFINE-UNICODE-RANGE-PROPERTIES`) and dispatched through one shared
 matcher, keeping property additions reviewable without duplicating control
 flow. `unicode-case-folding-data.lisp` owns the generated Unicode simple
-case-folding table. `character-class.lisp` consumes that data for class
+case-folding table.
+
+These four data files are the largest in `src/` by line count -- their size
+is upstream Unicode's, not this engine's, and splitting a generated,
+alphabetically/numerically monotonic lookup table into arbitrary chunks would
+add ASDF components and load-order bookkeeping without making any one chunk
+easier to read than the whole. `unicode-extra-binary-property-data.lisp` and
+`unicode-age-data.lisp` are marked "generated ... do not edit manually" for
+the same reason DECODE-CODE-POINT-RANGES's compact range-string format exists
+in `unicode-binary-property-range-data.lisp`: a hand-applied structural
+change to any of them would silently diverge from the next regeneration.
+
+`character-class.lisp` consumes that data for class
 composition, case folding, and boundary predicates -- its own five-shape
 boundary/start/end/start-half/end-half algebra (word boundaries in ASCII
 byte, Unicode-aware byte, and string domains) is generated once by
