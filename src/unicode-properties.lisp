@@ -143,7 +143,7 @@
       (values (parse-integer major-text) (and minor-text (parse-integer minor-text))))))
 
 (defun age-property-ranges (value)
-  "Return the UCD 16 ranges denoted by the Rust-compatible Age VALUE."
+  "Return the UCD 17.0.0 ranges denoted by the Rust-compatible Age VALUE."
   (let* ((compact (remove #\_ (string-downcase value)))
          (direct
         (find
