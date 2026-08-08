@@ -633,6 +633,19 @@
    (signals type-error (regex-set-matches-into set matches "cat" :end 4))
    (signals type-error (regex-set-matches-into set matches "cat" :timeout 0))))
 
+(it
+ "writes byte regex-set results into reusable buffers"
+ (flet ((octets (&rest values)
+          (make-array (length values)
+                      :element-type '(unsigned-byte 8)
+                      :initial-contents values)))
+   (let* ((set (compile-byte-regex-set '("A" "\\C" "A")))
+          (matches (make-array 3 :element-type 'bit :initial-element 0)))
+     (expect (regex-set-matches-into set matches (octets 65)) :to-be matches)
+     (expect (coerce matches 'list) :to-equal '(1 1 1))
+     (expect (regex-set-matches-at set (octets 255 65) 1) :to-equal '(0 1 2))
+     (expect (regex-set-match-at-p set (octets 255 65) 1) :to-be-truthy))))
+
 (it "routes advanced members through public regex-set APIs" (let* ((advanced (compile-regex "(?=a)a")) (set (compile-regex-set (quote ("a" "(?=a)a"))))) (expect (regex-advanced-p advanced) :to-be-truthy) (expect (regex-set-matches set "a") :to-equal (quote (0 1))) (expect (regex-set-matches-at set "xa" 1 :end 2) :to-equal (quote (0 1))) (expect (regex-set-match-at-p set "xa" 1 :end 2) :to-be-truthy))) (it "routes advanced members through byte regex-set APIs" (flet ((octets (&rest values) (make-array (length values) :element-type (quote (unsigned-byte 8)) :initial-contents values))) (let ((set (compile-byte-regex-set (quote ("A" "(?=A)A"))))) (expect (regex-set-matches set (octets 65)) :to-equal (quote (0 1))) (expect (regex-set-match-p set (octets 65)) :to-be-truthy))))
 
  (it
