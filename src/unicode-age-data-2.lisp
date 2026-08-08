@@ -1,6 +1,6 @@
 (in-package #:cl-regex-kit)
 
-;;; Generated from regex-syntax 0.8.11 Unicode 16.0 age.rs.
+;;; Generated from the Unicode 17.0.0 UCD DerivedAge.txt.
 ;;; Do not edit manually; regenerate from the upstream UCD table.
 ;;;
 ;;; Split from a single unicode-age-data.lisp into 3 roughly-equal-sized

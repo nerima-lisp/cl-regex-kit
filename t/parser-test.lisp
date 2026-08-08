@@ -14,6 +14,7 @@
           ("\\p{}") ("\\p{") ("\\p") ("\\x") ("\\x{}") ("\\x{1")
           ("\\x{110000}") ("\\x{D800}") ("\\uD800") ("\\u{D800}") ("\\U0000D800")
           ("\\U{D800}") ("\\u123") ("\\U00110000") ("\\400")
+          ("\\o") ("\\o{}") ("\\o{8}") ("\\o{1") ("\\o{400000000}")
           ("\\b{") ("\\b{middle}") ("\\b{start") ("[[:]]") ("[[:unknown:]]")
           ("[a-\\d]") ("[a") ("[") ("[a&&]") ("(?Pname)") ("(?q)a")
           ("(?i?a)") ("(?ii)a") ("(?i-i)a") ("(?i--m)a")
@@ -40,6 +41,8 @@
 
 (it-each (("\\d" "5" t) ("\\D" "x" t) ("\\s" :tab t) ("\\P{ASCII}" "é" t)
           ("\\x{41}" "A" t) ("\\u0041" "A" t) ("\\U00000041" "A" t)
+          ("\\o{101}" "A" t) ("(?x)\\o{ 1 0 1 }" "A" t)
+          ("\\o{141}" "a" nil)
           ("\\0" :nul t) ("\\00" :nul t) ("\\1" :start-of-heading t)
           ("\\12" :line-feed t) ("\\141" "a" t) ("\\r" :return t)
           ("\\v" :vertical-tab t) ("\\d" "5" nil) ("\\s" :tab nil))
@@ -47,8 +50,9 @@
     (pattern text unicode)
   (expect (escape-form-text text) :to-match-regex (compile-regex pattern :unicode unicode)))
 
-(it-each (("[\\0]" #.(code-char 0)) ("[\\12]" #\Newline) ("[\\141]" #\a))
-    "accepts the ~A octal escape as ~S inside a character class"
+(it-each (("[\\0]" #.(code-char 0)) ("[\\12]" #\Newline) ("[\\141]" #\a)
+          ("[\\o{141}]" #\a) ("(?x)[\\o{ 1 4 1 }]" #\a))
+    "accepts braced and legacy octal escapes inside a character class"
     (pattern character)
   (expect (string character) :to-match-regex (compile-regex pattern)))
 
@@ -89,7 +93,7 @@
   (dolist (pattern '("(?<2part>x)" "(?<.part>x)" "(?<[part>x)"))
     (signals regex-syntax-error (cl-regex-kit::parse-regex pattern)))
   (signals regex-syntax-error (cl-regex-kit::parse-regex "(?<name>a)(?<name>b)"))
-  (signals regex-syntax-error (cl-regex-kit::parse-regex "(?=a)")))
+  (expect (typep (cl-regex-kit::parse-regex "(?=a)") (quote cl-regex-kit::lookaround-node)) :to-be-truthy))
 
 (it "treats backslash-b inside a character class as backspace"
   (let ((regex (compile-regex "[\\b]")))
@@ -236,13 +240,59 @@
           :to-be-truthy))
 
 (it "rejects non-ASCII and Unicode-property class content in non-Unicode byte patterns"
-  (dolist (pattern '("[\\p{L}]" "[\\x{e9}]"))
+  (dolist (pattern (quote ("[\\p{L}]" "[\\x{e9}]")))
     (signals regex-syntax-error
       (cl-regex-kit::parse-regex pattern :byte-mode t :initial-flags 0)))
   ;; A raw single-octet escape is exempt: it explicitly names one byte value,
   ;; not a Unicode scalar the parser would otherwise have to reject.
   (expect (cl-regex-kit::parse-regex "[\\xe9]" :byte-mode t :initial-flags 0)
-          :to-be-truthy))
+          :to-be-truthy)
+  (expect (cl-regex-kit::parse-regex "[\\o{351}]" :byte-mode t :initial-flags 0)
+          :to-be-truthy)
+  (signals regex-syntax-error
+    (cl-regex-kit::parse-regex "[\\o{400}]" :byte-mode t :initial-flags 0)))
+(it "supports Unicode whitespace, non-newline, named characters, and line breaks"
+  (let* ((horizontal (compile-regex "\\h+"))
+         (not-horizontal (compile-regex "\\H+"))
+         (not-newline (compile-regex "\\N+"))
+         (not-newline-crlf (compile-regex "[\\N]+" :crlf t))
+         (line-break (compile-regex "\\R"))
+         (named (compile-regex "\\N{LATIN CAPITAL LETTER A}"))
+         (named-control (compile-regex "\\N{LINE FEED}"))
+         (crlf (format nil "~C~C" #\Return #\Newline))
+         (crlf-result (scan line-break crlf))
+         (byte-text (make-array 2
+                                :element-type (quote (unsigned-byte 8))
+                                :initial-contents (quote (#x0d #x0a))))
+         (byte-result (scan (compile-byte-regex "\\R") byte-text)))
+    (expect (full-match horizontal (format nil "~C~C" #\Tab #\Space))
+            :to-be-truthy)
+    (expect (full-match horizontal (string #\Newline)) :to-be-falsy)
+    (expect (full-match horizontal (string (code-char #xa0)))
+            :to-be-truthy)
+    (expect (full-match horizontal (string (code-char #x180e)))
+            :to-be-truthy)
+    (expect (full-match not-horizontal "a") :to-be-truthy)
+    (expect (full-match not-horizontal (string #\Space)) :to-be-falsy)
+    (expect (full-match not-newline "abc") :to-be-truthy)
+    (expect (full-match not-newline (format nil "a~Cb" #\Newline))
+            :to-be-falsy)
+    (expect (full-match not-newline-crlf "a") :to-be-truthy)
+    (expect (full-match not-newline-crlf (string #\Return)) :to-be-falsy)
+    (expect (full-match not-newline-crlf (string #\Newline)) :to-be-falsy)
+    (expect (full-match named "A") :to-be-truthy)
+    (expect (full-match named-control (string #\Newline)) :to-be-truthy)
+    (expect (full-match line-break crlf) :to-be-truthy)
+    (expect (match-end crlf-result) :to-equal 2)
+    (expect (full-match line-break (string #\Newline)) :to-be-truthy)
+    (expect (full-match line-break (string (code-char #x2028)))
+            :to-be-truthy)
+    (expect (full-match line-break (string (code-char #x2029)))
+            :to-be-truthy)
+    (expect (full-match line-break "x") :to-be-falsy)
+    (expect (match-end byte-result) :to-equal 2)
+    (signals regex-syntax-error
+      (compile-regex "\\N{NOT_A_REAL_CHARACTER}"))))
 
 (it "runs an unterminated quoted literal to the end of the pattern"
   (let ((regex (compile-regex "\\Qa.b")))
@@ -252,3 +302,22 @@
 (it "rejects an unclosed named-capture body and an unnamed group's missing < after ?P"
   (dolist (pattern '("(?P<name" "(?<name"))
     (signals regex-syntax-error (cl-regex-kit::parse-regex pattern))))
+(it "rejects constructs outside the current regex dialect" (dolist (pattern (quote ("(?Cx)" "(?C1x)" "(?C\"tag)" "(?{1})" "(??{1})" "a{~1}" "(*UNKNOWN)"))) (signals regex-syntax-error (cl-regex-kit::parse-regex pattern))))
+(it "parses PCRE2-style callouts"
+  (let ((plain (cl-regex-kit::parse-regex "(?C)"))
+        (numbered (cl-regex-kit::parse-regex "(?C42)"))
+        (tagged (cl-regex-kit::parse-regex "(?C\"mark\")")))
+    (expect (typep plain (quote cl-regex-kit::callout-node)) :to-be-truthy)
+    (expect (cl-regex-kit::callout-node-number numbered) :to-equal 42)
+    (expect (cl-regex-kit::callout-node-tag tagged) :to-equal "mark")
+    (dolist (pattern
+             (list "(?C\"mark\")"
+                   (format nil "(?C~Cmark~C)" (code-char 39) (code-char 39))
+                   "(?C^mark^)"
+                   "(?C%mark%)"
+                   "(?C#mark#)"
+                   "(?C$mark$)"
+                   "(?C{mark})"))
+      (expect (cl-regex-kit::callout-node-tag
+               (cl-regex-kit::parse-regex pattern))
+              :to-equal "mark"))))

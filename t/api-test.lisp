@@ -300,3 +300,393 @@
     (expect (capture-locations-p locations) :to-be-truthy)
     (expect (capture-locations-p nil) :to-be nil)
     (expect (capture-locations-p result) :to-be nil)))
+(it
+  "executes advanced ordered-backtracking patterns through public scan"
+  (let* ((lookahead (compile-regex "(?=a)a"))
+         (lookbehind (compile-regex "(?<=a)b"))
+         (possessive (compile-regex "a++"))
+         (possessive-failure (compile-regex "a++a"))
+         (atomic (compile-regex "(?>a|ab)c"))
+         (quoted-subroutine (compile-regex "(?<word>a)\\g'word'"))
+         (lookahead-result (scan lookahead "a"))
+         (lookbehind-result (scan lookbehind "ab"))
+         (possessive-result (scan possessive "aa"))
+         (atomic-result (scan atomic "ac"))
+         (quoted-subroutine-result (scan quoted-subroutine "aa")))
+    (dolist (regex (list lookahead
+                         lookbehind
+                         possessive
+                         atomic
+                         quoted-subroutine))
+      (expect (regex-advanced-p regex) :to-be-truthy)
+      (expect (regex-advanced-step-limit regex) :to-be-truthy)
+      (expect (regex-advanced-nest-limit regex) :to-be-truthy)
+      (expect (regex-never-newline-p regex) :to-be nil))
+    (expect (and lookahead-result
+                 (list (match-start lookahead-result)
+                       (match-end lookahead-result)))
+            :to-equal
+            (list 0 1))
+    (expect (and lookbehind-result
+                 (list (match-start lookbehind-result)
+                       (match-end lookbehind-result)))
+            :to-equal
+            (list 1 2))
+    (expect (and possessive-result
+                 (list (match-start possessive-result)
+                       (match-end possessive-result)))
+            :to-equal
+            (list 0 2))
+    (expect (scan possessive-failure "aa") :to-be-null)
+    (expect (and atomic-result
+                 (list (match-start atomic-result)
+                       (match-end atomic-result)))
+            :to-equal
+            (list 0 2))
+    (expect (and quoted-subroutine-result
+                 (list (match-start quoted-subroutine-result)
+                       (match-end quoted-subroutine-result)))
+            :to-equal
+            (list 0 2))
+    (expect (scan atomic "abc") :to-be-null)))
+(it "annotates only proven fixed-width lookbehinds" (labels ((width (pattern &key byte-mode) (let ((ast (if byte-mode (cl-regex-kit::regex-ast (compile-byte-regex pattern)) (cl-regex-kit::regex-ast (compile-regex pattern))))) (cl-regex-kit::assertion-node-fixed-length ast)))) (expect (width "(?<=ab)") :to-equal 2) (expect (width "(?<=a|bc)") :to-be nil) (expect (width "(?<=a{2})") :to-equal 2) (expect (width "(?<=a+)") :to-be nil) (expect (width "(?<=é)" :byte-mode t) :to-equal 2) (expect (width "(?<=[é])" :byte-mode t) :to-be nil)))
+(it
+  "bounds copied advanced states with the shared size limit"
+  (let* ((context
+           (cl-regex-kit::make-advanced-context
+            :state-limit 1
+            :state-count 0))
+         (state (cl-regex-kit::%make-advanced-state 0 (make-array 0)))
+         (condition
+           (let ((cl-regex-kit::*advanced-context* context))
+             (handler-case
+                 (progn
+                   (cl-regex-kit::%advanced-state-copy state)
+                   (cl-regex-kit::%advanced-state-copy state)
+                   nil)
+               (advanced-regex-limit-error (condition) condition)))))
+    (expect condition :to-be-truthy)
+    (when condition
+      (expect (advanced-regex-limit-kind condition) :to-equal :states)
+      (expect (advanced-regex-limit-used condition) :to-equal 2))))
+(it
+  "exposes MARK control-verb tags through the public match result"
+  (let* ((regex (compile-regex "a(*MARK:middle)b"))
+         (result (scan regex "ab")))
+    (expect (regex-advanced-p regex) :to-be-truthy)
+    (expect (match-string result "ab") :to-equal "ab")
+    (expect (match-mark result) :to-equal "middle")))
+(it
+  "applies advanced result selection and control verbs"
+  (let* ((selection (compile-regex "(?=a)(?:a|aa)"))
+         (fail (compile-regex "a(*FAIL)|b"))
+         (accept (compile-regex "a(*ACCEPT)b"))
+         (prune (compile-regex "a(*PRUNE)b|ac"))
+         (then (compile-regex "a(*THEN)b|ac"))
+         (bare-skip (compile-regex "ab(*SKIP)(*FAIL)|b"))
+         (named-skip
+           (compile-regex
+            "ab(*MARK:target)c(*SKIP:target)(*FAIL)|b|c"))
+         (multiple-names
+           (compile-regex
+            "ab(*MARK:A)c(*MARK:B)d(*SKIP:A)(*FAIL)|b|c|d"))
+         (missing-named-skip
+           (compile-regex "ab(*SKIP:missing)(*FAIL)|b"))
+         (longest (longest-match selection "aa")))
+    (dolist (regex
+             (list selection fail accept prune then bare-skip named-skip
+                   multiple-names missing-named-skip))
+      (expect (regex-advanced-p regex) :to-be-truthy))
+    (expect (shortest-match selection "aa") :to-equal 1)
+    (expect (and longest
+                 (list (match-start longest)
+                       (match-end longest)
+                       (match-string longest "aa")))
+            :to-equal
+            (list 0 2 "aa"))
+    (expect (match-string (scan fail "b") "b") :to-equal "b")
+    (expect (match-string (scan accept "ab") "ab") :to-equal "a")
+    (expect (scan prune "ac") :to-be-null)
+    (expect (scan bare-skip "ab") :to-be-null)
+    (let ((result (scan named-skip "abc")))
+      (expect (and result
+                   (list (match-start result)
+                         (match-end result)
+                         (match-string result "abc")))
+              :to-equal
+              (list 2 3 "c")))
+    (let ((result (scan multiple-names "abcd")))
+      (expect (match-string result "abcd") :to-equal "c"))
+    (let ((result (scan missing-named-skip "ab")))
+      (expect (match-string result "ab") :to-equal "b"))
+    (let ((result (scan then "ac")))
+      (expect result :to-be-truthy)
+      (expect (match-string result "ac") :to-equal "ac"))))
+(it
+  "covers advanced syntax families through public scan"
+  (let* ((cut (compile-regex "a\\Kb"))
+         (start (compile-regex "\\Gabc"))
+         (grapheme (compile-regex "\\X"))
+         (branch-reset (compile-regex "(?|(a)|(b))\\1"))
+         (conditional (compile-regex "(a)?(?(1)b|c)"))
+         (definition (compile-regex "(?(DEFINE)(?<word>[a-z]+))(?&word)"))
+         (recursive (compile-regex "(?<paren>\\((?:[^()]|(?&paren))*\\))"))
+         (cut-result (scan cut "ab"))
+         (start-result (scan start "zabc" :start 1))
+         (grapheme-text (format nil "a~C" (code-char #x301)))
+         (grapheme-result (scan grapheme grapheme-text))
+         (indic-conjunct-text
+           (format nil "~C~C~C"
+                   (code-char #x915)
+                   (code-char #x94D)
+                   (code-char #x915)))
+         (indic-conjunct-result (scan grapheme indic-conjunct-text))
+         (branch-result (scan branch-reset "bb"))
+         (conditional-result (scan conditional "c"))
+         (definition-result (scan definition "abc"))
+         (recursive-result (scan recursive "(a(b))")))
+    (dolist (regex (list cut start grapheme branch-reset conditional definition recursive))
+      (expect (regex-advanced-p regex) :to-be-truthy))
+    (expect (and cut-result
+                 (list (match-start cut-result)
+                       (match-end cut-result)
+                       (match-string cut-result "ab")))
+            :to-equal
+            (list 1 2 "b"))
+    (expect (and start-result
+                 (list (match-start start-result)
+                       (match-end start-result)
+                       (match-string start-result "zabc")))
+            :to-equal
+            (list 1 4 "abc"))
+    (expect (and grapheme-result
+                 (list (match-start grapheme-result)
+                       (match-end grapheme-result)
+                       (match-string grapheme-result grapheme-text)))
+            :to-equal
+            (list 0 2 grapheme-text))
+    (expect (and indic-conjunct-result
+                 (list (match-start indic-conjunct-result)
+                       (match-end indic-conjunct-result)
+                       (match-string indic-conjunct-result indic-conjunct-text)))
+            :to-equal
+            (list 0 3 indic-conjunct-text))
+    (expect (match-string branch-result "bb") :to-equal "bb")
+    (expect (match-string conditional-result "c") :to-equal "c")
+    (expect (match-string definition-result "abc") :to-equal "abc")
+    (expect (match-string recursive-result "(a(b))") :to-equal "(a(b))")))
+(it
+  "covers PCRE named-reference spellings and bounded advanced anchors"
+  (let* ((g-brace (compile-regex "(?<x>A)\\g{x}"))
+         (k-brace (compile-regex "(?<x>A)\\k{x}"))
+         (short-mark (compile-regex "a(*:middle)b"))
+         (bounded-dollar (compile-regex "a(*:middle)$"))
+         (bounded-end (compile-regex "a(*:middle)\\z"))
+         (bounded-text (format nil "a~C" #\Newline))
+         (g-result (scan g-brace "AA"))
+         (k-result (scan k-brace "AA"))
+         (mark-result (scan short-mark "ab"))
+         (dollar-result (scan bounded-dollar bounded-text :end 1))
+         (end-result (scan bounded-end bounded-text :end 1)))
+    (dolist (regex (list g-brace k-brace short-mark bounded-dollar bounded-end))
+      (expect (regex-advanced-p regex) :to-be-truthy))
+    (expect (and g-result (match-string g-result "AA")) :to-equal "AA")
+    (expect (and k-result (match-string k-result "AA")) :to-equal "AA")
+    (expect (match-mark mark-result) :to-equal "middle")
+    (expect (and dollar-result
+                 (list (match-start dollar-result)
+                       (match-end dollar-result)))
+            :to-equal
+            (list 0 1))
+    (expect (and end-result
+                 (list (match-start end-result)
+                       (match-end end-result)))
+            :to-equal
+            (list 0 1))))
+(it
+  "selects participating captures for duplicate named references"
+  (let* ((backreference
+           (compile-regex "(?J)\\A(?:(?<x>a)|(?<x>b)\\k<x>)\\z"))
+         (conditional
+           (compile-regex "(?J)\\A(?:(?<x>a)|(?<x>b))(?(x)c|d)\\z"))
+         (relative
+           (compile-regex "\\A(?<a>a)(?<b>b)\\g{-1}\\z")))
+    (dolist (regex (list backreference conditional relative))
+      (expect (regex-advanced-p regex) :to-be-truthy))
+    (expect (scan backreference "bb") :to-be-truthy)
+    (expect (scan backreference "ab") :to-be-null)
+    (expect (scan conditional "bc") :to-be-truthy)
+    (expect (scan conditional "bd") :to-be-null)
+    (expect (scan relative "abb") :to-be-truthy)
+    (expect (scan relative "aba") :to-be-null)))
+(it
+  "accepts Unicode capture names in advanced references"
+  (let* ((name (string (code-char #x00e9)))
+         (g-pattern (format nil "(?<~A>a)\\g{~A}" name name))
+         (k-pattern (format nil "(?<~A>a)\\k<~A>" name name))
+         (subroutine-pattern (format nil "(?<~A>a)(?&~A)" name name))
+         (conditional-pattern (format nil "(?<~A>a)(?(~A)b|c)" name name))
+         (g-brace (compile-regex g-pattern))
+         (k-angle (compile-regex k-pattern))
+         (subroutine (compile-regex subroutine-pattern))
+         (conditional (compile-regex conditional-pattern))
+         (g-result (scan g-brace "aa"))
+         (k-result (scan k-angle "aa"))
+         (subroutine-result (scan subroutine "aa"))
+         (conditional-result (scan conditional "ab")))
+    (dolist (regex (list g-brace k-angle subroutine conditional))
+      (expect (regex-advanced-p regex) :to-be-truthy))
+    (dolist (result (list g-result k-result subroutine-result conditional-result))
+      (expect (and result
+                   (list (match-start result)
+                         (match-end result)))
+              :to-equal
+              (list 0 2)))))
+(it
+  "supports balancing groups on the advanced path"
+  (let* ((balancing (compile-regex "(?<open>a)(?<-open>b)"))
+         (repeated (compile-regex "(?<open>a)+(?<-open>b)+"))
+         (underflow (compile-regex "(?<-open>b)"))
+         (balancing-result (scan balancing "ab"))
+         (repeated-result (scan repeated "aabb")))
+    (dolist (regex (list balancing repeated underflow))
+      (expect (regex-advanced-p regex) :to-be-truthy))
+    (expect (and balancing-result
+                 (list (match-start balancing-result)
+                       (match-end balancing-result)))
+          :to-equal
+          (list 0 2))
+    (expect (and repeated-result
+                 (list (match-start repeated-result)
+                       (match-end repeated-result)))
+          :to-equal
+          (list 0 4))
+    (expect (scan underflow "b") :to-be-null)))
+(it "runs PCRE2-style callouts"
+  (let ((events nil))
+    (let ((regex
+            (compile-regex "(?C7)a"
+                           :callout
+                           (lambda (number tag position text)
+                             (push (list number tag position text) events)
+                             :continue))))
+      (expect (scan regex "a") :to-be-truthy)
+      (expect (cl-regex-kit:regex-callout regex) :to-be-truthy)
+      (expect (nreverse events)
+              :to-equal
+              (list (list 7 nil 0 "a"))))
+    (let ((regex
+            (compile-regex "(?:(?C1)a|b)"
+                           :callout
+                           (lambda (number tag position text)
+                             (declare (ignore number tag position text))
+                             :fail))))
+      (expect (scan regex "b") :to-be-truthy)
+      (expect (scan regex "a") :to-be-null))
+    (dolist (pattern
+             (list "(?C\"tag\")a"
+                   (format nil "(?C~Ctag~C)a" (code-char 39) (code-char 39))
+                   "(?C^tag^)a"
+                   "(?C%tag%)a"
+                   "(?C#tag#)a"
+                   "(?C$tag$)a"
+                   "(?C{tag})a"))
+      (let* ((events nil)
+             (regex
+               (compile-regex
+                pattern
+                :callout
+                (lambda (number tag position text)
+                  (push (list number tag position text) events)
+                  :continue))))
+        (expect (scan regex "a") :to-be-truthy)
+        (expect (nreverse events)
+                :to-equal
+                (list (list 0 "tag" 0 "a")))))))
+(it "supports Unicode grapheme, word, and sentence boundary anchors"
+  (let* ((grapheme-text (format nil "a~C" (code-char #x301)))
+         (grapheme (compile-regex "\\b{g}\\X\\b{g}"))
+         (word (compile-regex "\\b{wb}word\\b{wb}"))
+         (sentence (compile-regex "\\b{sb}B"))
+         (sentence-lower (compile-regex "\\b{sb}b"))
+         (crlf (compile-regex "\\r\\b{sb}\\n"))
+         (grapheme-result (scan grapheme grapheme-text))
+         (word-result (scan word "word"))
+         (sentence-result (scan sentence "A. B"))
+         (sentence-lower-result (scan sentence-lower "A. b"))
+         (crlf-result
+           (scan crlf (format nil "A~C~CB" #\Return #\Linefeed)))
+         (byte-grapheme-text
+           (make-array 3
+                       :element-type '(unsigned-byte 8)
+                       :initial-contents '(97 204 129)))
+         (byte-grapheme
+           (compile-byte-regex "(?u:\\b{g}\\X\\b{g})"))
+         (byte-word-text
+           (make-array 4
+                       :element-type '(unsigned-byte 8)
+                       :initial-contents '(97 195 169 33)))
+         (byte-word
+           (compile-byte-regex "(?u:\\b{wb}\\p{L}+\\b{wb})"))
+         (byte-sentence-text
+           (make-array 4
+                       :element-type '(unsigned-byte 8)
+                       :initial-contents '(65 46 32 66)))
+         (byte-sentence
+           (compile-byte-regex "(?u:\\b{sb}B)"))
+         (invalid-byte-text
+           (make-array 2
+                       :element-type '(unsigned-byte 8)
+                       :initial-contents '(255 65)))
+         (invalid-byte-sentence
+           (compile-byte-regex "(?u:\\b{sb}A)"))
+         (byte-grapheme-result
+           (scan byte-grapheme byte-grapheme-text))
+         (byte-word-result
+           (scan byte-word byte-word-text))
+         (byte-sentence-result
+           (scan byte-sentence byte-sentence-text))
+         (invalid-byte-result
+           (scan invalid-byte-sentence invalid-byte-text)))
+    (dolist (regex
+             (list grapheme word sentence sentence-lower crlf
+                   byte-grapheme byte-word byte-sentence
+                   invalid-byte-sentence))
+      (expect (regex-advanced-p regex) :to-be-truthy))
+    (expect (and grapheme-result
+                 (list (match-start grapheme-result)
+                       (match-end grapheme-result)))
+            :to-equal
+            '(0 2))
+    (expect (and word-result
+                 (list (match-start word-result)
+                       (match-end word-result)))
+            :to-equal
+            '(0 4))
+    (expect (and sentence-result
+                 (list (match-start sentence-result)
+                       (match-end sentence-result)))
+            :to-equal
+            '(3 4))
+    (expect sentence-lower-result :to-be-null)
+    (expect crlf-result :to-be-null)
+    (expect (and byte-grapheme-result
+                 (list (match-start byte-grapheme-result)
+                       (match-end byte-grapheme-result)))
+            :to-equal
+            '(0 3))
+    (expect (and byte-word-result
+                 (list (match-start byte-word-result)
+                       (match-end byte-word-result)))
+            :to-equal
+            '(0 3))
+    (expect (and byte-sentence-result
+                 (list (match-start byte-sentence-result)
+                       (match-end byte-sentence-result)))
+            :to-equal
+            '(3 4))
+    (expect (and invalid-byte-result
+                 (list (match-start invalid-byte-result)
+                       (match-end invalid-byte-result)))
+            :to-equal
+            '(1 2))))

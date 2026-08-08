@@ -44,6 +44,8 @@
 (defconstant +flag-unicode+ #b100000)
 
 (defconstant +flag-crlf+ #b1000000)
+(defconstant +flag-no-auto-capture+ #b10000000)
+(defconstant +flag-duplicate-names+ #b100000000)
 
 (defconstant +maximum-repeat-count+ 1000
   "Largest finite repetition bound accepted by the parser.")
@@ -99,16 +101,19 @@
 (defun update-parser-flag (flags character enabled-p)
   "Return FLAGS with supported inline flag CHARACTER enabled or disabled."
   (let ((flag
-        (ecase character
-          (#\i +flag-case-insensitive+)
-          (#\m +flag-multiline+)
-          (#\s +flag-dotall+)
-          (#\U +flag-ungreedy+)
-          (#\x +flag-extended+)
-          (#\u +flag-unicode+)
-          (#\R +flag-crlf+))))
-    (if enabled-p (logior flags flag)
-      (logandc2 flags flag))))
+          (ecase character
+            (#\i +flag-case-insensitive+)
+            (#\m +flag-multiline+)
+            (#\s +flag-dotall+)
+            (#\U +flag-ungreedy+)
+            (#\x +flag-extended+)
+            (#\u +flag-unicode+)
+            (#\R +flag-crlf+)
+            (#\n +flag-no-auto-capture+)
+            (#\J +flag-duplicate-names+))))
+    (if enabled-p
+        (logior flags flag)
+        (logandc2 flags flag))))
 
 (defmacro with-parser-nesting ((depth limit overflow-form) &body body)
   "Execute BODY at one parser nesting level and always restore DEPTH."
