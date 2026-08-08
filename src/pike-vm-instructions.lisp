@@ -30,7 +30,8 @@
   (case (inst-op instruction)
     (:char (literal-node-unicode-p (inst-a instruction)))
     (:class (char-class-node-unicode-p (inst-a instruction)))
-    (:any (any-char-node-unicode-p (inst-a instruction)))))
+    (:any (any-char-node-unicode-p (inst-a instruction)))
+    (:line-break (line-break-node-unicode-p (inst-a instruction)))))
 
 (defun newline-element-p (element)
   "Return true when ELEMENT is a character or octet newline."
@@ -41,20 +42,58 @@
   "Return the exclusive end index and success flag for a consuming instruction."
   (cond
     ((>= position limit) (values nil nil))
+    ((eq (inst-op instruction) :line-break)
+     (let ((unicode-p (instruction-unicode-p instruction)))
+       (labels
+           ((element-code (element)
+              (if (characterp element) (char-code element) element))
+            (line-break-code-p (code)
+              (or
+               (= code #x0a)
+               (= code #x0b)
+               (= code #x0c)
+               (= code #x0d)
+               (= code #x85)
+               (and unicode-p
+                    (or (= code #x2028) (= code #x2029)))))
+            (match-one (at)
+              (if (and byte-mode-p unicode-p)
+                  (multiple-value-bind (character end valid-p)
+                      (utf8-character-at text at)
+                    (if (and valid-p (<= end limit))
+                        (values (char-code character) end t)
+                      (values nil nil nil)))
+                (let ((element (aref text at)))
+                  (values (element-code element) (1+ at) t)))))
+         (multiple-value-bind (code end valid-p) (match-one position)
+           (if (and
+                valid-p
+                (line-break-code-p code)
+                (not (and never-newline-p (= code #x0a))))
+               (if (and (= code #x0d) (< end limit))
+                   (multiple-value-bind (next-code next-end next-valid-p)
+                       (match-one end)
+                     (if (and next-valid-p (= next-code #x0a))
+                         (if never-newline-p
+                             (values nil nil)
+                           (values next-end t))
+                       (values end t)))
+                 (values end t))
+             (values nil nil))))))
     ((and byte-mode-p (instruction-unicode-p instruction))
-      (multiple-value-bind (character end valid-p) (utf8-character-at text position)
-        (if (and
+     (multiple-value-bind (character end valid-p) (utf8-character-at text position)
+       (if (and
             valid-p
             (<= end limit)
             (not (and never-newline-p (newline-element-p character)))
             (instruction-matches-p instruction character)) (values end t)
-          (values nil nil))))
+         (values nil nil))))
     (t
-      (let ((element (aref text position)))
-        (if (and
+     (let ((element (aref text position)))
+       (if (and
             (not (and never-newline-p (newline-element-p element)))
             (instruction-matches-p instruction element)) (values (1+ position) t)
-          (values nil nil))))))
+         (values nil nil))))))
 
 (defun vm-word-position-p (kind text position byte-mode-p unicode-p)
   "Evaluate a word-boundary KIND at POSITION for string or byte input."

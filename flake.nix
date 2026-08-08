@@ -22,12 +22,12 @@
     # `apps.default` pair, and the devShell -- is one `mkPackageFlake` call
     # below.
     cl-nix-forge = {
-      url = "github:nerima-lisp/cl-nix-forge/v0.4.0";
+      url = "github:nerima-lisp/cl-nix-forge/v0.5.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
     cl-weave = {
-      url = "github:nerima-lisp/cl-weave/v1.2.0";
+      url = "github:nerima-lisp/cl-weave/v1.3.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -37,7 +37,14 @@
     # `cl-regex-kit/test` -- see `lispDependencies` below and
     # `cl-regex-kit.asd`'s `:depends-on`.
     cl-parser-kit = {
-      url = "github:nerima-lisp/cl-parser-kit/v1.1.0";
+      url = "github:nerima-lisp/cl-parser-kit/v1.1.1";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    # Regex-set compilation now uses cl-concurrent-kit for bounded parallel
+    # compilation of independent member regexes before the merge pass.
+    cl-concurrent-kit = {
+      url = "github:nerima-lisp/cl-concurrent-kit/v0.6.1";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -62,6 +69,7 @@
       cl-nix-forge,
       cl-weave,
       cl-parser-kit,
+      cl-concurrent-kit,
       cl-cli,
       treefmt-nix,
     }:
@@ -114,7 +122,7 @@
             # cl-regex-kit itself is a sibling lispDependencies edge, exactly
             # like cl-parser-kit is for the main package below; cl-cli is
             # the one new dependency this executable adds. `ctx.package`
-            # carries cl-parser-kit transitively -- `lispDerivation` resolves
+            # carries the runtime dependencies transitively -- `lispDerivation` resolves
             # the registry through the whole closure -- so naming it here
             # would be a duplicate, not an addition.
             lispDependencies = [
@@ -153,21 +161,26 @@
 
       # cl-parser-kit is `cl-regex-kit` itself's parser toolkit -- see
       # regex-tokenizer.lisp/regex-grammar.lisp and `cl-regex-kit.asd`'s
-      # `:depends-on ("cl-parser-kit")` -- so it is a `lispDependencies`
-      # edge, resolved for every build, not gated behind `doCheck` the way
-      # `lispCheckDependencies` is.
-      # cl-parser-kit is itself an `mkPackageFlake` (cl-nix-forge) package,
-      # not a foreign one -- per cl-nix-forge's own dependency docs, "once a
+      # `:depends-on`. cl-concurrent-kit is likewise a runtime dependency now
+      # that regex-set compilation uses its bounded executor map. Both are
+      # `lispDependencies` edges, resolved for every build, not gated behind
+      # `doCheck` the way `lispCheckDependencies` is.
+      # These sibling flakes are themselves `mkPackageFlake` packages, not
+      # foreign ones -- per cl-nix-forge's own dependency docs, "once a
       # sibling repository's own flake exposes its package, it is an
       # ordinary `lispDependencies` entry", passed as-is rather than through
       # `cl.fromDerivation` (which is for packages this library did not
       # build and cannot assume anything about, e.g. whether they carry
       # fasls a consumer could reuse without recompiling into their own,
       # read-only, store path).
-      lispDependencies = ctx: [ cl-parser-kit.packages.${ctx.system}.cl-parser-kit ];
+      lispDependencies = ctx: [
+        cl-parser-kit.packages.${ctx.system}.cl-parser-kit
+        cl-concurrent-kit.packages.${ctx.system}.cl-concurrent-kit
+      ];
 
       # cl-weave and cl-cli are test-only ASDF dependencies (the production
-      # system's only dependency is cl-parser-kit, above): `cl-regex-kit.asd`'s
+      # system's runtime dependencies are cl-parser-kit and cl-concurrent-kit,
+      # above): `cl-regex-kit.asd`'s
       # `cl-regex-kit/test` depends directly on cl-weave, and transitively on
       # cl-cli through its own `:depends-on ("cl-regex-kit" "cl-regex-kit/cli"
       # "cl-weave")`, since `cl-regex-kit/cli` (cli/main.lisp, the
@@ -292,8 +305,8 @@
             # weaker protection against a future unhandled enum value. 100%
             # is not reachable here without either regressing test-suite
             # thoroughness's actual signal or removing that defensive code;
-            # these thresholds sit a couple of points below the current
-            # 96.49%/94.23% so the gate still catches a real regression.
+            # these thresholds sit below the current 96.37%/94.01% baseline
+            # so the gate still catches a real regression.
             validationCommands = [
               ''
                 test -s coverage/cover-index.html

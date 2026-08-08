@@ -26,6 +26,10 @@
    #:regex-static-capture-count
    #:regex-capture-names
    #:regex-group-index
+   #:regex-advanced-p
+   #:regex-advanced-step-limit
+   #:regex-advanced-nest-limit
+   #:regex-never-newline-p
    ;; Multi-pattern compilation
    #:compile-regex-set
    #:compile-byte-regex-set
@@ -66,6 +70,7 @@
    #:capture-location-end
    #:scan-captures-into
    #:scan-captures-into-at
+   #:run-advanced-regex
    ;; Text transformation
    #:split
    #:split-terminator
@@ -79,6 +84,7 @@
    #:match-result-p
    #:match-start
    #:match-end
+   #:match-mark
    #:match-string
    #:match-captures
    #:match-group-start
@@ -91,4 +97,8 @@
    #:regex-syntax-error-position
    #:regex-syntax-error-reason
    #:regex-timeout
-   #:regex-timeout-seconds))
+   #:regex-timeout-seconds
+   #:advanced-regex-limit-error
+   #:advanced-regex-limit-kind
+   #:advanced-regex-limit
+   #:advanced-regex-limit-used))

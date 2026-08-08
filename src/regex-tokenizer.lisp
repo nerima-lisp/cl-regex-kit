@@ -78,72 +78,134 @@ already confirmed by POSIX-CLASS-LOOKAHEAD-P. Returns (values (name
   "POSITION is just past the backslash. Returns (values type value
 next-position); TYPE is :ESCAPE for every recognized form."
   (let ((escaped (if (< position (length pattern)) (char pattern position)
-                      (tokenizer-fail pattern position "Unexpected end of pattern")))
+                     (tokenizer-fail pattern position "Unexpected end of pattern")))
         (next (1+ position)))
-    (macrolet ((token (value next-position) `(values :escape ,value ,next-position)))
+    (macrolet ((token (value next-position)
+                 (list (quote values) :escape value next-position)))
       (case escaped
         (#\p (multiple-value-bind (name negated-p after) (scan-unicode-property-name pattern next)
-               (token (list :kind :unicode-property :descriptor name :negated-p negated-p :from-p nil) after)))
+                (token (list :kind :unicode-property :descriptor name :negated-p negated-p :from-p nil) after)))
         (#\P (multiple-value-bind (name negated-p after) (scan-unicode-property-name pattern next)
-               (token (list :kind :unicode-property :descriptor name :negated-p negated-p :from-p t) after)))
-        ((#\d #\D #\w #\W #\s #\S) (token (list :kind :shorthand :which escaped) next))
+                (token (list :kind :unicode-property :descriptor name :negated-p negated-p :from-p t) after)))
+        ((#\d #\D #\w #\W #\s #\S #\h #\H)
+         (token (list :kind :shorthand :which escaped) next))
+        (#\N
+         (if (and (< next (length pattern)) (char= (char pattern next) #\{))
+             (multiple-value-bind (character after)
+                 (scan-named-character pattern (1+ next))
+               (token (list :kind :named-character :char character) after))
+             (token (list :kind :not-newline) next)))
+        (#\R
+         (if class-mode-p
+             (tokenizer-fail pattern position "\\R is not allowed inside a character class")
+             (token (list :kind :line-break) next)))
+        (#\X
+         (if class-mode-p
+             (tokenizer-fail pattern position "\\X is not allowed inside a character class")
+             (token (list :kind :grapheme) next)))
+        ((#\g #\k)
+         (if class-mode-p
+             (tokenizer-fail pattern position
+                             "Backreferences are not allowed inside a character class")
+             (multiple-value-bind (capture-index name after relative-index subroutine-p)
+    (scan-backreference pattern next escaped)
+  (token
+   (list :kind (if subroutine-p :subroutine :backreference)
+         :capture-index capture-index
+         :name name
+         :relative-index relative-index)
+   after))))
         (#\b (if class-mode-p
-                 (token (list :kind :literal :char (code-char 8)) next)
-                 ;; Always the bare form here: a possible `\b{name}` extended
-                 ;; form is resolved at grammar time by
-                 ;; REGEX-GRAMMAR.LISP's BUILD-ESCAPE-ATOM, which alone can
-                 ;; both tolerate live-extended-mode whitespace inside the
-                 ;; braces and cleanly express the "no name -- leave `{` for
-                 ;; the quantifier grammar" backtrack by simply not
-                 ;; consuming the following :LBRACE token, rather than by
-                 ;; rewinding a lexical position as the original character-
-                 ;; level parser did.
-                 (token (list :kind :word-boundary :which :word-boundary) next)))
+                  (token (list :kind :literal :char (code-char 8)) next)
+                  (token (list :kind :word-boundary :which :word-boundary) next)))
         ((#\a #\f #\n #\r #\t #\v)
          (multiple-value-bind (character raw-octet-p after) (scan-escaped-character pattern position)
            (declare (ignore raw-octet-p))
            (token (list :kind :control :char character) after)))
         ((#\x #\u #\U)
-         ;; A braced body (`\x{...}`, `\u{...}`, `\U{...}`) is scanned by the
-         ;; grammar layer instead of here, one significant token at a time
-         ;; via REGEX-COLLECT-BRACED-HEX -- unlike the fixed-width forms
-         ;; below, its digit count is unbounded, and RE2/Rust regex, like
-         ;; the original character-level parser, tolerates extended-mode
-         ;; whitespace between the digits; that tolerance depends on the
-         ;; *live* extended flag, which this one-pass, flag-independent
-         ;; tokenizer cannot evaluate.
          (if (and (< next (length pattern)) (char= (char pattern next) #\{))
              (values :hex-brace-open nil (1+ next))
-             (multiple-value-bind (character raw-octet-p after) (scan-escaped-character pattern position)
+             (multiple-value-bind (character raw-octet-p after)
+                 (scan-escaped-character pattern position)
                (token (list :kind :hex :char character :raw-octet-p raw-octet-p) after))))
-        ((#\0 #\1 #\2 #\3 #\4 #\5 #\6 #\7)
+        (#\0
          (unless *regex-octal-p*
            (tokenizer-fail pattern position "Octal escapes are disabled"))
          (multiple-value-bind (character after) (scan-octal-code pattern next)
            (token (list :kind :octal :char character) after)))
-        ((#\8 #\9) (tokenizer-fail pattern position "Backreferences are not supported"))
-        (#\A (if class-mode-p (token (list :kind :literal :char escaped) next)
-                 (token (list :kind :absolute-start) next)))
-        (#\z (if class-mode-p (token (list :kind :literal :char escaped) next)
-                 (token (list :kind :absolute-end) next)))
-        (#\B (if class-mode-p (token (list :kind :literal :char escaped) next)
-                 (token (list :kind :not-word-boundary) next)))
-        (#\< (if class-mode-p (token (list :kind :literal :char escaped) next)
-                 (token (list :kind :word-start) next)))
-        (#\> (if class-mode-p (token (list :kind :literal :char escaped) next)
-                 (token (list :kind :word-end) next)))
-        (#\C (if class-mode-p (token (list :kind :literal :char escaped) next)
+        ((#\1 #\2 #\3 #\4 #\5 #\6 #\7 #\8 #\9)
+         (if class-mode-p
+             (if (member escaped (quote (#\1 #\2 #\3 #\4 #\5 #\6 #\7)) :test (function char=))
                  (progn
-                   (unless *regex-byte-mode-p*
-                     (tokenizer-fail pattern position "\\C is only available in byte patterns"))
-                   (token (list :kind :any-byte) next))))
+                   (unless *regex-octal-p*
+                     (tokenizer-fail pattern position "Octal escapes are disabled"))
+                   (multiple-value-bind (character after)
+                       (scan-octal-code pattern next)
+                     (token (list :kind :octal :char character) after)))
+                 (tokenizer-fail
+                  pattern position
+                  "Backreferences are not allowed inside a character class"))
+             (let ((decimal-end next))
+               (loop while (and (< decimal-end (length pattern))
+                                (digit-char-p (char pattern decimal-end)))
+                     do (incf decimal-end))
+               (let* ((octal-only-p
+                        (loop for index from position below decimal-end
+                              always (octal-digit-p (char pattern index))))
+                      (end (if octal-only-p
+                               (min decimal-end (+ position 3))
+                               decimal-end))
+                      (digits (subseq pattern position end))
+                      (capture-index (parse-integer digits))
+                      (octal-candidate-p (every (function octal-digit-p) digits))
+                      (octal-char
+                        (when (and octal-candidate-p
+                                   (<= (length digits) 3))
+                          (let ((code (parse-integer digits :radix 8)))
+                            (when (<= code #o377)
+                              (code-char code))))))
+                 (token
+                  (list :kind :numeric-reference
+                        :capture-index capture-index
+                        :digits digits
+                        :octal-candidate-p octal-candidate-p
+                        :octal-char octal-char)
+                  end)))))
+        (#\A (if class-mode-p (token (list :kind :literal :char escaped) next)
+                  (token (list :kind :absolute-start) next)))
+        (#\G (if class-mode-p (token (list :kind :literal :char escaped) next)
+                  (token (list :kind :match-start) next)))
+        (#\K (if class-mode-p (token (list :kind :literal :char escaped) next)
+                  (token (list :kind :reset-match-start) next)))
+        (#\z (if class-mode-p (token (list :kind :literal :char escaped) next)
+                  (token (list :kind :absolute-end) next)))
+        (#\Z (if class-mode-p (token (list :kind :literal :char escaped) next)
+                  (token (list :kind :end-before-final-newline) next)))
+        (#\B (if class-mode-p (token (list :kind :literal :char escaped) next)
+                  (token (list :kind :not-word-boundary) next)))
+        (#\< (if class-mode-p (token (list :kind :literal :char escaped) next)
+                  (token (list :kind :word-start) next)))
+        (#\> (if class-mode-p (token (list :kind :literal :char escaped) next)
+                  (token (list :kind :word-end) next)))
+        (#\C (if class-mode-p (token (list :kind :literal :char escaped) next)
+                  (progn
+                    (unless *regex-byte-mode-p*
+                      (tokenizer-fail pattern position "\\C is only available in byte patterns"))
+                    (token (list :kind :any-byte) next))))
         (#\Q (if class-mode-p (token (list :kind :literal :char escaped) next)
-                 (multiple-value-bind (text after) (scan-quoted-literal pattern next)
-                   (token (list :kind :quoted-literal :text text) after))))
+                  (multiple-value-bind (text after) (scan-quoted-literal pattern next)
+                    (token (list :kind :quoted-literal :text text) after))))
         (otherwise
-         (when (ascii-alphanumeric-p escaped)
-           (tokenizer-fail pattern position "Invalid escape sequence"))
-         (token (list :kind :literal :char escaped) next))))))
+         (if (char= escaped #\o)
+             (progn
+               (unless (and (< next (length pattern))
+                            (char= (char pattern next) #\{))
+                 (tokenizer-fail pattern position "Expected { after \\o"))
+               (values :octal-brace-open nil (1+ next)))
+             (progn
+               (when (ascii-alphanumeric-p escaped)
+                 (tokenizer-fail pattern position "Invalid escape sequence"))
+               (token (list :kind :literal :char escaped) next))))))))
 
 (defun structural-token-type (character)
   (case character
@@ -182,6 +244,15 @@ established by PARSE-REGEX."
               (multiple-value-bind (type value next) (tokenize-escape pattern (1+ position) (plusp class-depth))
                 (emit type value start next)
                 (setf position next)))
+            ((and (zerop class-depth)
+                  (char= character #\()
+                  (< (+ position 2) length)
+                  (char= (char pattern (1+ position)) #\?)
+                  (char= (char pattern (+ position 2)) #\#))
+             (let ((end (position #\) pattern :start (+ position 3))))
+               (unless end
+                 (tokenizer-fail pattern (+ position 3) "Unclosed comment"))
+               (setf position (1+ end))))
             ((and (plusp class-depth) (posix-class-lookahead-p pattern position))
               (multiple-value-bind (posix next) (scan-posix-class-token pattern position)
                 (emit :posix-class posix start next)

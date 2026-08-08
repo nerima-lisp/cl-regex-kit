@@ -7,8 +7,9 @@ used by [RE2](https://github.com/google/re2) and
 [Rust's `regex` crate](https://github.com/rust-lang/regex) -- so matching time
 stays linear in the input length regardless of the pattern.
 
-Everything is portable Common Lisp with no runtime dependencies; only the test
-system uses [cl-weave](https://github.com/nerima-lisp/cl-weave).
+The library depends on `cl-parser-kit` and `cl-concurrent-kit` at runtime. The
+test system additionally uses [cl-weave](https://github.com/nerima-lisp/cl-weave)
+and the CLI system requires [cl-cli](https://github.com/nerima-lisp/cl-cli).
 
 Start with [Getting started](getting-started.md), then read [Core
 concepts](guide/concepts.md) for the parser -> NFA -> Pike's VM pipeline and
@@ -60,9 +61,12 @@ case). RE2 and Rust's `regex` took a different approach: compile the pattern
 to a nondeterministic finite automaton and simulate every reachable state at
 once, character by character, so a failed path is merged away instead of
 retried. That structurally forecloses catastrophic backtracking, at the cost
-of a smaller feature set -- no backreferences, no lookaround.
+of a smaller feature set in the regular execution path.
 
-`cl-regex-kit` follows that second design, from scratch, in Common Lisp.
+`cl-regex-kit` keeps that regular path and adds a separate bounded,
+ordered-backtracking executor for capture-dependent and other constructs that
+cannot be represented by a finite automaton. Both paths are implemented from
+scratch in Common Lisp.
 
 ## Design notes
 
@@ -71,7 +75,8 @@ of a smaller feature set -- no backreferences, no lookaround.
 - **Captures without giving up the guarantee.** Each thread carries its own
   capture-slot vector (Pike's VM), so leftmost-first submatch semantics survive
   the simulation instead of requiring a return to backtracking.
-- **A deliberately smaller feature set.** Backreferences and lookaround are
-  out of scope from the start -- see
-  [Compatibility](reference/compatibility.md) -- because retrofitting them later would
-  mean reintroducing the exponential blowup the whole design avoids.
+- **Two execution paths with an explicit boundary.** The regular path keeps
+  the linear-time guarantee; the advanced path provides backreferences,
+  lookaround, grapheme clusters, subroutines, and related constructs under
+  `:size-limit` and `:nest-limit`. See
+  [Compatibility](reference/compatibility.md) for the exact boundary.

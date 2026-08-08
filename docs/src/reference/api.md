@@ -327,11 +327,11 @@ includes the suffix after `end`.
 
 ```lisp
 (replace-first regex text replacement
-               &key (start 0) end timeout (template-syntax :dollar)) => string
+               &key (start 0) end timeout) => string
 (replace-all regex text replacement
-             &key (start 0) end timeout (template-syntax :dollar)) => string
+             &key (start 0) end timeout) => string
 (replace-n regex text replacement count
-           &key (start 0) end timeout (template-syntax :dollar)) => string
+           &key (start 0) end timeout) => string
 ```
 
 `replacement` can be a function of `(match-result text)` returning a string,
@@ -340,64 +340,14 @@ replacements, matching Rust `Regex::replacen`; `count` must be a non-negative
 integer. For byte regexes, every replacement function returns an octet vector
 instead of a string.
 
-`template-syntax` selects the template dialect. Any other value signals a
-`type-error` before any replacement is performed. It is ignored when
-`replacement` is a function.
-
-#### `:dollar` (the default)
-
-Rust-style templates. `$$` is a literal dollar, `$0` and `$1` are numeric
-captures, and `$name` or `${name}` are named captures. A capture that is
-absent or unknown expands to the empty string. Unbraced names after `$` use
-only ASCII letters, digits, and `_`; use `${name}` for capture names
+Templates use one Rust-style syntax. `$$` is a literal dollar, `$0` and `$1`
+are numeric captures, and `$name` or `${name}` are named captures. A capture
+that is absent or unknown expands to the empty string. Unbraced names after
+`$` use only ASCII letters, digits, and `_`; use `${name}` for capture names
 containing Unicode characters, `.`, `[`, or `]`. A backslash has no special
-meaning here, so `\1` is emitted verbatim.
+meaning, so `\1` is emitted verbatim.
 
-#### `:backslash`
-
-cl-ppcre-compatible templates, for callers migrating from
-`cl-ppcre:regex-replace-all` and for tools whose own users write
-backslash backreferences.
-
-| Template | Expands to |
-|---|---|
-| `\1` .. `\9`, `\10`, ... | that capture group; digits are consumed greedily, so `\12` is group 12, never group 1 then `2` |
-| `\0` | the entire match |
-| `\&` | the entire match |
-| `\{12}` | group 12, braced |
-| `\{name}` | the capture named `name` |
-| `\\` | a literal backslash |
-| `\` before anything else | both characters verbatim, so `\q` stays `\q` |
-| a trailing `\` | a literal backslash |
-| `$` | never special; `$1` stays `$1` |
-
-A reference to a group that does not exist, or that did not participate in
-the match, expands to the empty string -- the same rule the `:dollar` path
-uses.
-
-Byte regexes accept octet-vector templates in both dialects, with the same
-ASCII forms.
-
-##### Deliberate divergences from cl-ppcre
-
-These are the cases where `:backslash` does not reproduce
-`cl-ppcre:regex-replace-all` exactly. Every one of them accepts input that
-cl-ppcre rejects, so a template that works under cl-ppcre works here
-unchanged.
-
-| Template | cl-ppcre | cl-regex-kit |
-|---|---|---|
-| `\0` | signals `ppcre-invocation-error` | the entire match, matching `$0` |
-| `\5` with fewer than 5 groups | signals `ppcre-invocation-error` | the empty string |
-| `\{name}` | copied verbatim (cl-ppcre allows only digits in braces) | the named capture |
-| `` \` `` (text before the match) | the text before the match | verbatim `` \` `` |
-| `\'` (text after the match) | the text after the match | verbatim `\'` |
-
-The out-of-range case is the one to keep in mind: cl-ppcre fails loudly and
-this engine substitutes the empty string, so a typo in a user-supplied
-template goes unreported. That is the same behavior `:dollar` already has,
-and it keeps a bad template in a configuration file from aborting the
-surrounding operation.
+Byte regexes accept octet-vector templates with the same ASCII forms.
 
 ## Reading a match
 

@@ -24,8 +24,10 @@ non-overlapping results while safely advancing through zero-length matches.
    malformed patterns, capture groups, greedy/lazy quantifiers, anchors,
    classes, and zero-length multi-match advancement.
 6. SBCL `sb-cover` instrumentation produces an HTML report for every
-   production source file. Run `nix run .#coverage` to write them to
-   `coverage/`; the Nix check enforces a 96% expression / 92% branch
+   production source file. Run `nix develop --command env
+   CL_REGEX_KIT_COVERAGE_DIRECTORY="$PWD/coverage" sbcl --script
+   run-coverage.lisp` to write them to `coverage/`; the Nix check enforces a
+   96% expression / 92% branch
    coverage gate across handwritten source files (generated Unicode data
    files are excluded; see `run-coverage.lisp`'s
    `+generated-source-file-names+`) -- see "Known gaps" below for why the
@@ -33,11 +35,15 @@ non-overlapping results while safely advancing through zero-length matches.
 7. Shrinkable property tests cover escaping, bounded repetition, and merged
    regex-set equivalence; bounded parser fuzzing rejects only documented
    syntax errors and exposes all other failures.
+8. Unicode shorthand and line-break escapes include `\\h`/`\\H`, `\\N`, `\\R`,
+   and named characters such as `\\N{LATIN CAPITAL LETTER A}`. `\\R` treats
+   CRLF as one consuming unit in both capture-aware and regex-set execution.
 
 ## Explicit non-goals
 
-See [Compatibility](../reference/compatibility.md): backreferences and lookaround
-are not planned, by design.
+See [Compatibility](../reference/compatibility.md) for the split between the
+regular NFA path and the bounded advanced executor. The project does not embed
+user code, PCRE callouts, balancing groups, or fuzzy matching.
 
 ## Known gaps
 
@@ -88,5 +94,10 @@ are not planned, by design.
 
 ## Future extensions
 
-- Additional regular-expression syntax where it preserves the finite-automaton
-  execution model
+- Broader PCRE-compatible syntax beyond the current advanced executor, with
+  each addition requiring parser, AST, runtime, replacement, regex-set, and
+  semantic regression coverage
+- Unicode conformance expansion for grapheme, word, and sentence boundary
+  behavior, including more UAX-29 edge-case fixtures
+- Complete the normal ASDF load path for the advanced executor and keep the
+  standard Nix test entry point green

@@ -12,42 +12,52 @@
   :author "takeokunn <bararararatty@gmail.com>"
   :maintainer "takeokunn <bararararatty@gmail.com>"
   :license "MIT"
-  :version "0.3.0"
+  :version "0.4.0"
   :homepage "https://github.com/nerima-lisp/cl-regex-kit"
   :bug-tracker "https://github.com/nerima-lisp/cl-regex-kit/issues"
   :source-control (:git "https://github.com/nerima-lisp/cl-regex-kit.git")
-  :depends-on ("cl-parser-kit")
+  :depends-on ("cl-concurrent-kit" "cl-parser-kit")
   :pathname "src"
   :serial t
   :components ((:file "package")
-    (:file "conditions")
-    (:file "ast")
-    (:file "unicode-property-data")
-    (:file "unicode-extra-binary-property-data")
-    (:file "unicode-age-data-1")
-    (:file "unicode-age-data-2")
-    (:file "unicode-age-data-3")
-    (:file "unicode-age-data")
-    (:file "unicode-binary-property-range-data")
-    (:file "unicode-properties")
-    (:file "unicode-property-runtime")
-    (:file "unicode-property-resolver")
-    (:file "unicode-case-folding-data")
-    (:file "character-class")
-    (:file "text-boundaries")
-    (:file "parser-syntax")
-    (:file "regex-tokenizer-escapes")
-    (:file "regex-tokenizer")
-    (:file "regex-grammar-support")
-    (:file "regex-grammar")
-    (:file "regex-grammar-classes")
-    (:file "nfa")
-    (:module "pike-vm-core" :pathname "" :serial t :components ((:file "pike-vm-instructions") (:file "pike-vm-closure") (:file "pike-vm-capture") (:file "pike-vm-set")))
-    (:file "api")
-    (:file "api-match")
-    (:file "api-operations")
-    (:file "api-replace")
-    (:file "regex-set"))
+               (:file "conditions")
+               (:file "ast")
+               (:file "unicode-property-data")
+               (:file "unicode-extra-binary-property-data")
+               (:file "unicode-age-data-1")
+               (:file "unicode-age-data-2")
+               (:file "unicode-age-data-3")
+               (:file "unicode-age-data")
+               (:file "unicode-binary-property-range-data")
+               (:file "unicode-properties")
+               (:file "unicode-property-runtime")
+               (:file "unicode-property-resolver")
+               (:file "unicode-case-folding-data")
+               (:file "character-class")
+               (:file "text-boundaries")
+               (:file "parser-syntax")
+               (:file "regex-tokenizer-escapes")
+               (:file "regex-tokenizer")
+               (:file "regex-grammar-support")
+               (:file "regex-grammar")
+               (:file "regex-grammar-classes")
+               (:file "nfa")
+               (:module
+                "pike-vm-core"
+                :pathname
+                ""
+                :serial
+                t
+                :components
+                ((:file "pike-vm-instructions")
+                 (:file "pike-vm-closure")
+                 (:file "pike-vm-capture")
+                 (:file "pike-vm-set")))
+               (:file "api")
+               (:file "api-match")
+               (:file "api-operations")
+               (:file "api-replace")
+               (:file "regex-set"))
   :in-order-to ((test-op (test-op "cl-regex-kit/test"))))
 
 (asdf:defsystem "cl-regex-kit/cli"
@@ -55,7 +65,7 @@
   :author "takeokunn <bararararatty@gmail.com>"
   :maintainer "takeokunn <bararararatty@gmail.com>"
   :license "MIT"
-  :version "0.3.0"
+  :version "0.4.0"
   :homepage "https://github.com/nerima-lisp/cl-regex-kit"
   :bug-tracker "https://github.com/nerima-lisp/cl-regex-kit/issues"
   :source-control (:git "https://github.com/nerima-lisp/cl-regex-kit.git")
@@ -72,7 +82,7 @@
   :author "takeokunn <bararararatty@gmail.com>"
   :maintainer "takeokunn <bararararatty@gmail.com>"
   :license "MIT"
-  :version "0.3.0"
+  :version "0.4.0"
   :homepage "https://github.com/nerima-lisp/cl-regex-kit"
   :bug-tracker "https://github.com/nerima-lisp/cl-regex-kit/issues"
   :source-control (:git "https://github.com/nerima-lisp/cl-regex-kit.git")
@@ -80,23 +90,26 @@
   :pathname "t"
   :serial t
   :components ((:file "package")
-    (:file "matchers")
-    (:file "ast-test")
-    (:file "parser-test")
-    (:file "nfa-test")
-    (:file "pike-vm-test")
-    (:file "api-test")
-    (:file "api-unicode-test")
-    (:file "api-properties-test")
-    (:file "api-options-test")
-    (:file "api-operations-test")
-    (:file "api-replace-test")
-    (:file "cli-test"))
+               (:file "matchers")
+               (:file "ast-test")
+               (:file "parser-test")
+               (:file "nfa-test")
+               (:file "pike-vm-test")
+               (:file "api-test")
+               (:file "api-unicode-test")
+               (:file "api-properties-test")
+               (:file "api-options-test")
+               (:file "api-operations-test")
+               (:file "api-operations-byte-test")
+               (:file "api-replace-test")
+               (:file "cli-test"))
   :perform (test-op
-    (operation component)
-    (declare (ignore operation component))
-    (unless (funcall (symbol-function (find-symbol "RUN-TESTS" "CL-REGEX-KIT/TEST")))
-      (error "cl-regex-kit test suite failed"))))
+            (operation component)
+            (declare (ignore operation component))
+            (unless (funcall
+                     (symbol-function
+                      (find-symbol "RUN-TESTS" "CL-REGEX-KIT/TEST")))
+              (error "cl-regex-kit test suite failed"))))
 
 (asdf:defsystem "cl-regex-kit/benchmark"
   :description "Benchmark system for cl-regex-kit"
