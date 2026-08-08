@@ -301,7 +301,18 @@ a string.
 `regex-set-matches-into` accepts a caller-owned bit vector with exactly
 `regex-set-count` elements. It clears that vector and marks every matching
 source-order index with `1`, avoiding the result-list allocation for repeated
-scans.
+scans. The same operation works for byte regex sets and preserves the octet
+input representation:
+
+```lisp
+(let* ((set (compile-byte-regex-set '("A" "\\C" "A")))
+       (matches (make-array 3 :element-type 'bit :initial-element 0))
+       (text (make-array 1
+                         :element-type '(unsigned-byte 8)
+                         :initial-contents '(65))))
+  (regex-set-matches-into set matches text)
+  (coerce matches 'list)) ; => (1 1 1)
+```
 
 ## Text transformation
 

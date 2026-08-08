@@ -45,6 +45,9 @@ path and exposes explicit step and nesting limits.
    grapheme clusters, atomic and possessive constructs, subroutines and
    recursion, conditionals, branch-reset groups, control verbs, callouts, and
    the related public scan, replace, split, and `regex-set` operations.
+10. Regex sets expose source-order matching, positional queries, boolean
+    queries, and caller-owned bit-vector result buffers; the byte-oriented
+    variants reuse the same operations over octet vectors.
 
 ## Explicit non-goals
 
