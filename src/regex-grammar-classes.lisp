@@ -1,7 +1,7 @@
 ;;;; src/regex-grammar-classes.lisp
 ;;;;
-;;;; Character-class body grammar: `[...]`, POSIX classes, and the set-
-;;;; operator expression grammar (`&&`, `~~`, `--`), over the token vector
+;;;; Character-class body grammar: `[...]`, POSIX classes, extended classes,
+;;;; and set-operator expression grammars (`&&`, `~~`, `--`), over the token vector
 ;;;; regex-tokenizer.lisp produces. Shares PARSE-REGEX's dynamically-bound
 ;;;; state (regex-grammar.lisp) the same way its core grammar functions do.
 (in-package #:cl-regex-kit)
@@ -239,3 +239,112 @@ neither `]` nor another `-` -- probed without consuming the hyphen."
           (fail "Unclosed character class"))
         (take-token)
         (make-class nil negated-p matcher)))))
+
+(defun extended-class-token-character-p (character)
+  (let ((token (peek-token)))
+    (and token
+         (member (token-type token)
+                 '(:char :hyphen :lparen :rparen :pipe :plus :caret))
+         (characterp (token-value token))
+         (char= (token-value token) character))))
+
+(defun consume-extended-class-character (character)
+  (when (extended-class-token-character-p character)
+    (take-token)
+    t))
+
+(defun consume-extended-class-pair (character)
+  (let ((saved *regex-token-position*))
+    (when (extended-class-token-character-p character)
+      (take-token)
+      (if (extended-class-token-character-p character)
+          (progn
+            (take-token)
+            t)
+          (progn
+            (setf *regex-token-position* saved)
+            nil)))))
+
+(defun consume-extended-class-set-operator ()
+  (cond
+    ((consume-extended-class-pair #\&) :intersection)
+    ((consume-extended-class-pair #\~) :symmetric-difference)
+    ((consume-extended-class-pair #\-) :difference)
+    ((consume-extended-class-character #\&) :intersection)
+    ((consume-extended-class-character #\^) :symmetric-difference)
+    ((consume-extended-class-character #\-) :difference)))
+
+(defun consume-extended-class-union-operator ()
+  (cond
+    ((consume-extended-class-pair #\|) :union)
+    ((consume-extended-class-character #\|) :union)
+    ((consume-extended-class-character #\+) :union)))
+
+(defun parse-extended-class-atom ()
+  (cond
+    ((consume-extended-class-character #\!)
+     (list :negate (parse-extended-class-atom)))
+    ((consume-extended-class-character #\()
+     (let ((matcher (parse-extended-class-union)))
+       (unless (consume-extended-class-character #\))
+         (fail "Unclosed parenthesized extended character class"))
+       matcher))
+    (t
+     (let ((token (peek-token)))
+       (cond
+         ((null token)
+          (fail "Extended character class requires an atom"))
+         ((eq (token-type token) :lbracket)
+          (node-matcher (parse-class)))
+         ((eq (token-type token) :posix-class)
+          (take-token)
+          (posix-class-matcher
+            (car (token-value token))
+            (cdr (token-value token))
+            (token-start token)))
+         ((member (token-type token)
+                  '(:escape :hex-brace-open :octal-brace-open))
+          (multiple-value-bind (literal matcher raw-octet-p) (class-item)
+            (cond
+              (matcher matcher)
+              ((characterp literal)
+               (ensure-byte-class-character literal raw-octet-p)
+               (ranges-matcher (list (range literal literal))))
+              (t
+               (fail "Extended character class escape must resolve to a character")))))
+         (t
+          (fail "Extended character class atoms must be escaped or class expressions")))))))
+
+(defun parse-extended-class-intersection ()
+  (let ((left (parse-extended-class-atom)))
+    (loop for operator = (consume-extended-class-set-operator)
+          while operator
+          do (setf left (list operator left (parse-extended-class-atom))))
+    left))
+
+(defun parse-extended-class-union ()
+  (let ((left (parse-extended-class-intersection)))
+    (loop for operator = (consume-extended-class-union-operator)
+          while operator
+          do (setf left (list operator left (parse-extended-class-intersection))))
+    left))
+
+(defun parse-extended-class ()
+  "Parse Perl's `(?[...])` extended character-class expression."
+  (take-token)
+  (unless (peek-type :lbracket)
+    (fail "Invalid extended character class prefix"))
+  (take-token)
+  (let ((matcher
+          (if (peek-type :rbracket)
+              (progn
+                (take-token)
+                nil)
+              (prog1 (parse-extended-class-union)
+                (unless (peek-type :rbracket)
+                  (fail "Unclosed extended character class"))
+                (take-token)))))
+    (unless (peek-type :rparen)
+      (fail "Unclosed extended character class group"))
+    (take-token)
+    (make-class nil nil matcher)))

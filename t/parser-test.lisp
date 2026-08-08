@@ -16,6 +16,7 @@
           ("\\U{D800}") ("\\u123") ("\\U00110000") ("\\400")
           ("\\o") ("\\o{}") ("\\o{8}") ("\\o{1") ("\\o{400000000}")
           ("\\b{") ("\\b{middle}") ("\\b{start") ("[[:]]") ("[[:unknown:]]")
+          ("(?[a])") ("(?[[a]&])") ("(?[[a]~[b]])")
           ("[a-\\d]") ("[a") ("[") ("[a&&]") ("(?Pname)") ("(?q)a")
           ("(?i?a)") ("(?ii)a") ("(?i-i)a") ("(?i--m)a")
           ("a{") ("a{1") ("a{1,2") ("a{1,0}") ("a{1001}") ("a**") ("("))
@@ -118,6 +119,30 @@
       (expect a :to-match-regex regex)))
   (let ((regex (compile-regex "[[a]&&[]]")))
     (expect-not "a" :to-match-regex regex)))
+
+(it "supports Perl extended character classes and set algebra"
+  (dolist (row '(("(?[[a-c]+[x-z]])" ("a" "x") ("d" "w"))
+                 ("(?[[a-z]&[d-f]])" ("d" "f") ("a" "x"))
+                 ("(?[[a-c]-[b-d]])" ("a") ("b" "d"))
+                 ("(?[[a-c]^[b-d]])" ("a" "d") ("b" "c"))
+                 ("(?[![a]])" ("b") ("a"))))
+    (destructuring-bind (pattern members non-members) row
+      (let ((regex (compile-regex pattern)))
+        (dolist (member members)
+          (expect (full-match regex member) :to-be-truthy))
+        (dolist (non-member non-members)
+          (expect (full-match regex non-member) :to-be-falsy)))))
+  (let ((regex (compile-regex "(?[([a-c]&[b-d])|[x]])")))
+    (expect (full-match regex "b") :to-be-truthy)
+    (expect (full-match regex "x") :to-be-truthy)
+    (expect (full-match regex "a") :to-be-falsy))
+  (let ((regex (compile-regex "(?[\\d+\\p{Lu}])")))
+    (expect (full-match regex "5") :to-be-truthy)
+    (expect (full-match regex "A") :to-be-truthy)
+    (expect (full-match regex "x") :to-be-falsy))
+  (let ((regex (compile-regex "(?[[:digit:]])")))
+    (expect (full-match regex "5") :to-be-truthy)
+    (expect (full-match regex "x") :to-be-falsy)))
 
 (it "flushes accumulated literal ranges before a later class-item kind"
   (let ((regex (compile-regex "[a[:digit:]]")))
