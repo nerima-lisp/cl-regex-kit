@@ -6,6 +6,9 @@ The engine is implemented end to end: parsing produces the `regex-node` AST,
 Thompson construction compiles it to an instruction program, and Pike's VM
 executes it with leftmost-first matching and captures. `all-matches` returns
 non-overlapping results while safely advancing through zero-length matches.
+Patterns that require capture-dependent or ordered-backtracking semantics are
+dispatched to the bounded AST executor, which is part of the normal ASDF load
+path and exposes explicit step and nesting limits.
 
 ## Implemented scope
 
@@ -24,8 +27,10 @@ non-overlapping results while safely advancing through zero-length matches.
    malformed patterns, capture groups, greedy/lazy quantifiers, anchors,
    classes, and zero-length multi-match advancement.
 6. SBCL `sb-cover` instrumentation produces an HTML report for every
-   production source file. Run `nix run .#coverage` to write them to
-   `coverage/`; the Nix check enforces a 96% expression / 92% branch
+   production source file. Run `nix develop --command env
+   CL_REGEX_KIT_COVERAGE_DIRECTORY="$PWD/coverage" sbcl --script
+   run-coverage.lisp` to write them to `coverage/`; the Nix check enforces a
+   96% expression / 92% branch
    coverage gate across handwritten source files (generated Unicode data
    files are excluded; see `run-coverage.lisp`'s
    `+generated-source-file-names+`) -- see "Known gaps" below for why the
@@ -33,60 +38,49 @@ non-overlapping results while safely advancing through zero-length matches.
 7. Shrinkable property tests cover escaping, bounded repetition, and merged
    regex-set equivalence; bounded parser fuzzing rejects only documented
    syntax errors and exposes all other failures.
+8. Unicode shorthand and line-break escapes include `\\h`/`\\H`, `\\N`, `\\R`,
+   and named characters such as `\\N{LATIN CAPITAL LETTER A}`. `\\R` treats
+   CRLF as one consuming unit in both capture-aware and regex-set execution.
+9. The bounded advanced executor handles backreferences, lookaround, extended
+   grapheme clusters, atomic and possessive constructs, subroutines and
+   recursion, conditionals, branch-reset groups, control verbs, callouts, and
+   the related public scan, replace, split, and `regex-set` operations.
 
 ## Explicit non-goals
 
-See [Compatibility](../reference/compatibility.md): backreferences and lookaround
-are not planned, by design.
+See [Compatibility](../reference/compatibility.md) for the split between the
+regular NFA path and the bounded advanced executor. The project does not embed
+Perl-style code interpolation or fuzzy matching.
 
 ## Known gaps
 
-- **Coverage sits below 100%/100%, so the Nix check gates at 96%/92%
-  instead** (96.49% expression / 94.23% branch as of this writing, up from
-  95.63%/93.38% after a pass that downloaded the `sb-cover` HTML report
-  from CI and read every uncovered line across all 23 flagged files,
-  rather than assuming the whole gap was structural). That pass separated
-  two real categories:
-  - Structural `sb-cover` blind spots that account for most of the
-    remaining 252 uncovered expressions: `in-package`, value-less
-    `defvar`/`defconstant`, `defmacro`/`defclass` bodies, `defparameter`
-    data literals, and `&key` defaults never show "executed" regardless of
-    how thoroughly the surrounding file is exercised -- confirmed by
-    `scan`'s `(start 0)` default still showing uncovered even though
-    several different test files already call it without `:start`. These
-    cannot be closed by adding tests; `checks.coverage`'s 96%/92% gate
-    (`flake.nix`) accepts this permanently rather than blocking CI on an
-    unreachable number.
-  - Real, reachable logic nothing exercised, closed in that same pass (see
-    the `git log` message "close real coverage gaps found by inspecting
-    the sb-cover HTML report" for the full list): a character-class item
-    ordering that flushes pending literal ranges before a POSIX class or
-    an escape matcher, `\P{...}` negation and `\B`/`\C`/`\Q`-as-literal
-    inside a class, the lazy optional `a??` quantifier, an alternation
-    whose first (not second) branch is itself non-static, `\p{NChar}`'s
-    fast-path range check, and a Unicode property
-    (`Grapheme_Extend`/U+09BE) that falls outside SBCL's own grapheme-break
-    classification.
-  - Not conclusively resolved: two defensive "should never happen" `error`
-    catch-alls in `nfa.lisp` (every `inst-op` and AST node subtype the
-    compiler can emit already has its own case arm, so these look like
-    closed-enumeration guards rather than reachable gaps -- kept for
-    defensiveness against a future unhandled case rather than deleted to
-    chase the coverage number); one arm of `changes-when-case-mapped-p`'s
-    lowercase/titlecase/uppercase `or` chain in
-    `unicode-property-resolver.lisp` (titlecase and uppercase mappings
-    coincide for ordinary letters, so the short-circuit order makes the
-    uppercase-only arm hard to isolate without a character where titlecase
-    is the identity but uppercase is not); three `fail` branches in
-    `regex-grammar-support.lisp`/`regex-grammar.lisp` whose triggering
-    input wasn't found through code reading alone. `ensure-byte-character`'s
-    own `> #xff` check is likely genuinely unreachable: every call site
-    that reaches it (`ensure-byte-class-character`, `range`) either already
-    rejects a non-raw-octet character above `#x7f` first, or only ever
-    passes bounds that are structurally `<= #xff` (`\xHH` and `\ooo`
-    escapes cannot produce a larger value).
+- **The latest Nix coverage check is below its configured gates.** The
+  functional test derivation is green, but the separate coverage check remains
+  below the 96% expression and 92% branch gates in `flake.nix`; the flake
+  failure is therefore a coverage-gate failure rather than a functional test
+  failure. The remaining uncovered paths include both instrumentation blind
+  spots and reachable advanced-executor/parser branches that still need
+  dedicated fixtures. Reproduce the current result with `nix flake check`.
+- **Unicode data is current for the generated families.** The checked-in
+  property, age, Word_Break, and case-folding tables are generated from the
+  official Unicode 17.0.0 UCD. Reproduce the checked-in-data check with
+  `perl tools/generate-unicode-data.pl --ucd-dir DIR --check` after obtaining
+  the UCD source. General categories, Script, Block, Grapheme_Cluster_Break,
+  Sentence_Break, and selected runtime-only binary properties still follow
+  the Unicode data provided by SBCL; full implementation-independent UCD
+  conformance remains future work.
+- **Dialect parity remains bounded by design.** The advanced executor supports
+  the documented backreference, assertion, recursion, control-verb, and
+  callout families, but its resource limits are not a linear-time or
+  fixed-memory guarantee. Perl-style code interpolation and fuzzy matching
+  remain explicit non-goals.
 
 ## Future extensions
 
-- Additional regular-expression syntax where it preserves the finite-automaton
-  execution model
+- Broaden the PCRE-compatible dialect beyond the current advanced executor,
+  with each addition requiring parser, AST, runtime, replacement, regex-set,
+  and semantic regression coverage
+- Unicode conformance expansion for grapheme, word, and sentence boundary
+  behavior, including more UAX-29 edge-case fixtures
+- Keep the normal ASDF and Nix test entry points green while extending backend
+  coverage and documenting the supported bounds

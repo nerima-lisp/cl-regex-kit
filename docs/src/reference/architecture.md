@@ -56,6 +56,9 @@ src/
                   RUN-PIKE-VM-SET: merged INST program -> matching indexes
   api.lisp        compiled-regex model, compilation, literal macros, metadata
   api-match.lisp  input validation, timeout handling, scans, and match accessors
+  advanced-match.lisp
+                  bounded AST execution for backreferences, assertions,
+                  recursion, control verbs, and other non-regular constructs
   api-operations.lisp
                   non-overlapping iteration and split operations
   api-replace.lisp
@@ -82,6 +85,13 @@ public functions in one file: `api.lisp` creates immutable compiled values,
 stream for iteration and splitting, and `api-replace.lisp` adds replacement
 template expansion.  This keeps matching independent of higher-level
 operations and makes the ASDF serial order the dependency order.
+
+Compilation selects one of two execution paths.  A regular AST is lowered to
+an NFA and executed by the Pike VM; an AST containing capture-dependent or
+ordered-backtracking constructs is retained and executed by
+`advanced-match.lisp`.  The advanced path is deliberately bounded by step and
+nesting limits, and the shared match/operation APIs dispatch to it through the
+same compiled-regex value.
 
 ## Data flow
 
@@ -307,8 +317,8 @@ adjacent, which would not preserve it.
   timeout, the treefmt-backed formatting gate, the mkdocs site and its check,
   `apps.test`/`apps.default`, and the dev shell, replacing what this file used
   to hand-write. `cl-weave` reaches the test system through
-  `lispCheckDependencies` (resolved only under `doCheck`, matching
-  `cl-regex-kit.asd`'s dependency-free production system), and the
+  `lispCheckDependencies` (resolved only under `doCheck`; the production
+  system itself depends on `cl-parser-kit` and `cl-concurrent-kit`), and the
   percentage-threshold coverage gate is one `extraOutputs` check built on
   `mkCommandCheck`, since threshold enforcement is domain-specific to this
   project rather than something the generic preset provides.
@@ -326,7 +336,7 @@ adjacent, which would not preserve it.
   as a real command-line tool. `cl-regex-kit/cli` is its own `.asd` system
   (`:depends-on ("cl-regex-kit" "cl-cli")`, `:build-operation "program-op"`)
   so the core `cl-regex-kit` system's dependency list stays exactly
-  `("cl-parser-kit")` -- this is a separate delivery, not a new dependency of
+  `("cl-concurrent-kit" "cl-parser-kit")` -- this is a separate delivery, not a new dependency of
   the library. `flake.nix` builds it with `cl.mkExecutable`, the same
   `packages.<name>` shape `mkPackageFlake` already produces for the library
   itself. Used directly, no adapter: `make-app`/`make-option`/
@@ -336,7 +346,8 @@ adjacent, which would not preserve it.
   library's only "boundary" is `sb-ext:with-timeout` in `call-with-timeout`,
   which is a real-time interrupt mechanism, not a value a fake clock can
   drive. Introducing it would add a runtime dependency to a system whose
-  production code depends on nothing but `cl-parser-kit`, for a boundary
+  production code already depends on `cl-parser-kit` and `cl-concurrent-kit`,
+  for a boundary
   this project does not actually have.
 - **`cl-codec-kit`** -- evaluated and **not adopted**. `utf8-character-at`/
   `utf8-character-before` (`text-boundaries.lisp`) are not a general-purpose
