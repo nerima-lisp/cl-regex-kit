@@ -25,7 +25,12 @@ that every pattern still has the NFA path's worst-case bound.
   `upper`, `word`, and `xdigit`, including inner negation), plus intersection (`&&`), difference (`--`),
   and symmetric-difference (`~~`) set operations with nested or direct right
   operands; empty classes (`[]`) denote the empty set, and negated empty
-  classes (`[^]`) denote the full alphabet.
+  classes (`[^]`) denote the full alphabet. Perl/PCRE2-style extended
+  character classes (`(?[...])`) additionally accept escaped atoms, POSIX
+  classes, nested ordinary classes, and grouped expressions. Their set
+  operators are complement (`!`), union (`|`, `+`), intersection (`&`),
+  difference (`-`), and symmetric difference (`^`); the doubled `&&`, `--`,
+  and `~~` spellings are accepted there as well.
 - Unicode-aware `\\d`/`\\w`/`\\s` shorthands, `\\pX`/`\\PX` and `\\p{...}`/`\\P{...}` Unicode
   general-category, Script, Block, Age, Grapheme_Cluster_Break, Word_Break,
   Sentence_Break, selected binary properties, and Rust-compatible property-value

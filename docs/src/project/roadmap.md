@@ -15,8 +15,10 @@ path and exposes explicit step and nesting limits.
 1. **`parse-regex`** -- literals, concatenation, alternation, grouping
    (capturing, named, and `(?:...)`), repetition (`*`, `+`, `?`, `{m}`,
    `{m,n}`, `{m,}`,
-   greedy and lazy), character classes, escapes, inline flags, and line,
-   absolute, and word-boundary anchors.
+   greedy and lazy), character classes and set operations (including
+   Perl/PCRE2-style extended classes `(?[...])` with grouped expressions,
+   escapes, and POSIX atoms), escapes, inline flags, and line, absolute, and
+   word-boundary anchors.
 2. **`compile-to-nfa`** -- Thompson construction from the AST to the `inst`
    program, one case per `regex-node` subclass.
 3. **`run-pike-vm`** -- the thread-set simulation itself: sparse-set thread
