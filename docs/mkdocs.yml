@@ -1,5 +1,5 @@
 site_name: cl-regex-kit
-site_description: A from-scratch regular expression engine for Common Lisp, built on Thompson NFA construction and Pike's VM for linear-time matching
+site_description: A from-scratch Common Lisp regular expression engine with a Thompson NFA/Pike VM for regular patterns and a bounded AST executor for advanced constructs
 site_url: https://nerima-lisp.github.io/cl-regex-kit/
 repo_url: https://github.com/nerima-lisp/cl-regex-kit
 repo_name: nerima-lisp/cl-regex-kit
