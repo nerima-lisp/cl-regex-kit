@@ -61,7 +61,7 @@
                     (:set-match
                       (if stop-at-first-match-p (return-from run-pike-vm-set t)
                         (setf (aref match-bits (inst-a instruction)) 1)))
-                    ((:char :class :any)
+                    ((:char :class :any :line-break)
                       (multiple-value-bind (next-position matched-p) (instruction-match-end
                           instruction
                           text
