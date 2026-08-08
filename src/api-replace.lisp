@@ -2,23 +2,23 @@
 
 (defun replacement-capture (match-result text designator empty-value)
   (let ((index
-         (if (integerp designator) designator
-           (cdr
-            (assoc
-             designator
-             (match-result-group-names match-result)
-             :test
-             #'string=)))))
+          (if (integerp designator)
+              designator
+              (and (find designator
+                         (match-result-group-names match-result)
+                         :key #'car
+                         :test #'string=)
+                   (resolve-group-index match-result designator)))))
     (if (and
          (integerp index)
          (<= 0 index)
-         (< index (length (match-result-groups match-result)))) (or
-                                                                 (match-group-string
-                                                                  match-result
-                                                                  index
-                                                                  text)
-                                                                 empty-value)
-      empty-value)))
+         (< index (length (match-result-groups match-result))))
+        (or (match-group-string
+             match-result
+             index
+             text)
+            empty-value)
+        empty-value)))
 
 (defun replacement-capture-string (match-result text designator)
   (replacement-capture match-result text designator ""))

@@ -561,3 +561,42 @@
     (expect (cl-regex-kit::word-character-p symbol t) :to-be-null)
     (expect (cl-regex-kit::word-boundary-p (format nil "a~C" symbol) 1 t)
             :to-be-truthy)))
+(it "applies UAX #29 word-boundary rules" (let ((hebrew-single (format nil "~C~C~C" (code-char #x05d0) (code-char #x0027) (code-char #x05d1))) (hebrew-double (format nil "~C~C~C" (code-char #x05d0) (code-char #x0022) (code-char #x05d1))) (regional (format nil "~C~C~C" (code-char #x1f1e6) (code-char #x1f1e7) (code-char #x1f1e8))) (zwj-emoji (format nil "~C~C~C" (code-char #x1f469) (code-char #x200d) (code-char #x1f4bb)))) (expect (cl-regex-kit::word-boundary-p "a:b" 1 t) :to-be-null) (expect (cl-regex-kit::word-boundary-p "a:b" 2 t) :to-be-null) (expect (cl-regex-kit::word-boundary-p "1,234" 1 t) :to-be-null) (expect (cl-regex-kit::word-boundary-p "1,234" 2 t) :to-be-null) (expect (cl-regex-kit::word-boundary-p "a-b" 1 t) :to-be-truthy) (expect (cl-regex-kit::word-boundary-p "a-b" 2 t) :to-be-truthy) (expect (cl-regex-kit::word-boundary-p "  " 1 t) :to-be-null) (expect (cl-regex-kit::word-boundary-p hebrew-single 1 t) :to-be-null) (expect (cl-regex-kit::word-boundary-p hebrew-single 2 t) :to-be-null) (expect (cl-regex-kit::word-boundary-p hebrew-double 1 t) :to-be-null) (expect (cl-regex-kit::word-boundary-p hebrew-double 2 t) :to-be-null) (expect (cl-regex-kit::word-boundary-p regional 1 t) :to-be-null) (expect (cl-regex-kit::word-boundary-p regional 2 t) :to-be-truthy) (expect (cl-regex-kit::word-boundary-p zwj-emoji 2 t) :to-be-null)))
+(it
+  "uses Unicode 16.0 Word_Break data for boundary decisions"
+  (dolist (case (quote ((#x06dd :NUMERIC)
+                        (#x070f :ALETTER)
+                        (#x0308 :EXTEND))))
+    (destructuring-bind (code expected) case
+      (expect (cl-regex-kit::unicode-word-break-class (code-char code))
+              :to-be
+              expected)))
+  (let ((space-extend-space
+          (format nil "~C~C~C"
+                  (code-char #x0020)
+                  (code-char #x0308)
+                  (code-char #x0020))))
+    (expect (cl-regex-kit::word-boundary-p space-extend-space 2 t)
+            :to-be-truthy))
+  (expect
+    (cl-regex-kit::word-boundary-p
+      (format nil "~C~C" (code-char #x06dd) (code-char #x0661))
+      1
+      t)
+    :to-be-null)
+  (expect
+    (cl-regex-kit::word-boundary-p
+      (format nil "~C~C" (code-char #x070f) (code-char #x071d))
+      1
+      t)
+    :to-be-null)
+  (expect
+    (cl-regex-kit::unicode-property-descriptor-matches-p
+      (cl-regex-kit::resolve-unicode-property "WB=Numeric")
+      (code-char #x06dd))
+    :to-be-truthy)
+  (expect
+    (cl-regex-kit::unicode-property-descriptor-matches-p
+      (cl-regex-kit::resolve-unicode-property "WB=ALetter")
+      (code-char #x070f))
+    :to-be-truthy))

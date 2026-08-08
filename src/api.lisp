@@ -13,6 +13,8 @@
                         :reader regex-advanced-step-limit)
    (advanced-nest-limit :initarg :advanced-nest-limit
                         :reader regex-advanced-nest-limit)
+   (callout :initarg :callout :reader regex-callout
+            :initform nil)
    (group-count :initarg :group-count :reader regex-group-count)
    (static-capture-count :initarg :static-capture-count
                          :reader regex-static-capture-count)
@@ -196,12 +198,13 @@ independently-computed call that could silently drift from it."
                                   'character))))
      flags)))
 
-(defun finish-compiled-regex (ast pattern byte-mode-p size-limit never-newline nest-limit)
+(defun finish-compiled-regex (ast pattern byte-mode-p size-limit never-newline nest-limit callout)
   "Shared tail of COMPILE-REGEX/COMPILE-BYTE-REGEX.
 
 Safe patterns are compiled to the existing Thompson-NFA program. Patterns
 using features that need ordered backtracking retain their AST and are
 executed by the bounded advanced matcher instead."
+  (annotate-lookbehind-lengths ast byte-mode-p)
   (let ((advanced-p (ast-contains-advanced-p ast)))
     (multiple-value-bind (program group-count)
         (if advanced-p
@@ -209,12 +212,13 @@ executed by the bounded advanced matcher instead."
             (compile-to-nfa ast pattern :instruction-limit size-limit))
       (multiple-value-bind (static-group-count static-p)
           (ast-static-capture-count ast)
-        (make-instance 'regex
+        (make-instance (quote regex)
                        :program program
                        :ast ast
                        :advanced-p advanced-p
                        :advanced-step-limit size-limit
                        :advanced-nest-limit nest-limit
+                       :callout callout
                        :group-count group-count
                        :static-capture-count (and static-p (1+ static-group-count))
                        :group-names (collect-group-names ast)
@@ -224,12 +228,14 @@ executed by the bounded advanced matcher instead."
 
 (defun %compile-pattern (pattern byte-mode-p case-insensitive multi-line dot-matches-new-line
                           swap-greed ignore-whitespace unicode crlf literal never-capture
-                          never-newline octal line-terminator size-limit nest-limit)
+                          never-newline octal line-terminator size-limit nest-limit callout)
   "Shared body of COMPILE-REGEX and COMPILE-BYTE-REGEX, which differ only in
 BYTE-MODE-P: whether PARSE-REGEX runs in byte mode, whether the resulting AST
 is UTF-8-normalized, and whether the invalid-UTF-8-admission check applies
 (byte regexes are meant to admit arbitrary octets; character regexes, which
 match Lisp strings, cannot represent an invalid one)."
+  (when (and callout (not (functionp callout)))
+    (error "CALLOUT must be a function or NIL"))
   (multiple-value-bind (line-terminator flags)
       (validate-regex-compile-options
        byte-mode-p
@@ -249,7 +255,8 @@ match Lisp strings, cannot represent an invalid one)."
             (error 'regex-syntax-error
                    :pattern pattern
                    :reason "Character regexes cannot match invalid UTF-8 bytes")))
-      (finish-compiled-regex ast pattern byte-mode-p size-limit never-newline nest-limit))))
+      (finish-compiled-regex ast pattern byte-mode-p size-limit never-newline
+                              nest-limit callout))))
 
 (defmacro define-pattern-compiler (name byte-mode-p domain-description)
   "Define NAME as a COMPILE-REGEX-shaped entry point compiling PATTERN for
@@ -258,9 +265,9 @@ DOMAIN-DESCRIPTION with RE2/Rust-compatible options, dispatching to
 
 COMPILE-REGEX and COMPILE-BYTE-REGEX share every keyword argument and
 default; the only difference between them is BYTE-MODE-P and their
-docstring's domain. Generating both from one specification keeps that
-12-keyword lambda list as a single source of truth: a new compilation
-option only needs adding here, not once per domain."
+docstring\s domain. Generating both from one specification keeps the
+keyword lambda list as a single source of truth: a new compilation option
+only needs adding here, not once per domain."
   `(defun ,name (pattern &key case-insensitive multi-line
                           dot-matches-new-line swap-greed
                           ignore-whitespace (unicode t) crlf
@@ -268,11 +275,12 @@ option only needs adding here, not once per domain."
                           (octal t)
                           (line-terminator #\Newline)
                           (size-limit +maximum-instruction-count+)
-                          (nest-limit +default-nest-limit+))
+                          (nest-limit +default-nest-limit+)
+                          (callout nil))
      ,(format nil "Compile PATTERN for ~A with RE2/Rust-compatible options." domain-description)
      (%compile-pattern pattern ,byte-mode-p case-insensitive multi-line dot-matches-new-line
-                        swap-greed ignore-whitespace unicode crlf literal never-capture
-                        never-newline octal line-terminator size-limit nest-limit)))
+                       swap-greed ignore-whitespace unicode crlf literal never-capture
+                       never-newline octal line-terminator size-limit nest-limit callout)))
 
 (define-pattern-compiler compile-regex nil "string matching")
 (define-pattern-compiler compile-byte-regex t "octet-vector matching")

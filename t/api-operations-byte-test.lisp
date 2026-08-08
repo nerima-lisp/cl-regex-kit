@@ -226,4 +226,5 @@
          (expect
           (scan (compile-byte-regex "\\B") scalar :start 1 :end 1)
           :to-be
-          nil))))))
+          nil)))))
+  (it "applies UAX #29 word boundaries at UTF-8 scalar offsets" (flet ((octets (&rest values) (make-array (length values) :element-type (quote (unsigned-byte 8)) :initial-contents values))) (let ((punctuated (octets #x61 #x3a #x62)) (regional (octets #xf0 #x9f #x87 #xa6 #xf0 #x9f #x87 #xa7 #xf0 #x9f #x87 #xa8))) (expect (cl-regex-kit::byte-unicode-word-boundary-p punctuated 1) :to-be-null) (expect (cl-regex-kit::byte-unicode-word-boundary-p punctuated 2) :to-be-null) (expect (cl-regex-kit::byte-unicode-word-boundary-p regional 4) :to-be-null) (expect (cl-regex-kit::byte-unicode-word-boundary-p regional 8) :to-be-truthy)))))

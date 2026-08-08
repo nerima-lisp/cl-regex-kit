@@ -302,8 +302,22 @@
 (it "rejects an unclosed named-capture body and an unnamed group's missing < after ?P"
   (dolist (pattern '("(?P<name" "(?<name"))
     (signals regex-syntax-error (cl-regex-kit::parse-regex pattern))))
-(it "rejects constructs outside the current regex dialect"
-  (dolist (pattern (quote ("(?C1)" "(?{1})" "(??{1})"
-                            "(?<open>a)(?<-open>b)" "a{~1}" "(*UNKNOWN)")))
-    (signals regex-syntax-error
-      (cl-regex-kit::parse-regex pattern))))
+(it "rejects constructs outside the current regex dialect" (dolist (pattern (quote ("(?Cx)" "(?C1x)" "(?C\"tag)" "(?{1})" "(??{1})" "a{~1}" "(*UNKNOWN)"))) (signals regex-syntax-error (cl-regex-kit::parse-regex pattern))))
+(it "parses PCRE2-style callouts"
+  (let ((plain (cl-regex-kit::parse-regex "(?C)"))
+        (numbered (cl-regex-kit::parse-regex "(?C42)"))
+        (tagged (cl-regex-kit::parse-regex "(?C\"mark\")")))
+    (expect (typep plain (quote cl-regex-kit::callout-node)) :to-be-truthy)
+    (expect (cl-regex-kit::callout-node-number numbered) :to-equal 42)
+    (expect (cl-regex-kit::callout-node-tag tagged) :to-equal "mark")
+    (dolist (pattern
+             (list "(?C\"mark\")"
+                   (format nil "(?C~Cmark~C)" (code-char 39) (code-char 39))
+                   "(?C^mark^)"
+                   "(?C%mark%)"
+                   "(?C#mark#)"
+                   "(?C$mark$)"
+                   "(?C{mark})"))
+      (expect (cl-regex-kit::callout-node-tag
+               (cl-regex-kit::parse-regex pattern))
+              :to-equal "mark"))))

@@ -311,17 +311,33 @@ NIL.  The returned vector never exposes the VM's capture slots."
   (check-type match-result match-result)
   (let ((resolved
           (if (stringp index)
-              (or (cdr (assoc index (match-result-group-names match-result) :test #'string=))
-                  (error 'type-error
-                         :datum index
-                         :expected-type '(or integer known-capture-name)))
+              (let ((indexes
+                      (mapcar #'cdr
+                              (remove-if-not
+                               (lambda (entry)
+                                 (string= index (car entry)))
+                               (match-result-group-names match-result)))))
+                (or (find-if
+                     (lambda (candidate)
+                       (let ((offsets
+                               (aref (match-result-groups match-result)
+                                     candidate)))
+                         (and (car offsets) (cdr offsets))))
+                     indexes)
+                    (first indexes)
+                    (error (quote type-error)
+                           :datum index
+                           :expected-type
+                           (quote (or integer known-capture-name)))))
               index)))
     (unless (and (integerp resolved)
                  (<= 0 resolved)
                  (< resolved (length (match-result-groups match-result))))
-      (error 'type-error
+      (error (quote type-error)
              :datum index
-             :expected-type `(integer 0 ,(1- (length (match-result-groups match-result))))))
+             :expected-type
+             (list (quote integer) 0
+                   (1- (length (match-result-groups match-result))))))
     resolved))
 
 (defun match-group-start (match-result index)

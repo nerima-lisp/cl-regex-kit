@@ -51,7 +51,7 @@
       (:grapheme-break
        (eq payload (sb-unicode:grapheme-break-class character)))
       (:word-break
-       (eq payload (sb-unicode:word-break-class character)))
+       (eq payload (unicode-word-break-class character)))
       (:sentence-break
        (eq payload (sb-unicode:sentence-break-class character)))
       (otherwise

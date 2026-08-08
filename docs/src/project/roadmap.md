@@ -43,7 +43,7 @@ non-overlapping results while safely advancing through zero-length matches.
 
 See [Compatibility](../reference/compatibility.md) for the split between the
 regular NFA path and the bounded advanced executor. The project does not embed
-user code, PCRE callouts, balancing groups, or fuzzy matching.
+Perl-style code interpolation or fuzzy matching.
 
 ## Known gaps
 

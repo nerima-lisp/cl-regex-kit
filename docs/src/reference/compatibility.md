@@ -82,12 +82,22 @@ regular NFA alone:
   `(?P>name)`, relative calls, and recursion conditions
 - DEFINE blocks, capture conditions, and branch-reset groups
   (`(?|...)`)
+- .NET-style balancing groups, including `(?<name>...)` capture pushes and
+  `(?<-name>...)` history pops. They are advanced-path only; capture history is
+  private to the executor, while the public match result exposes the current
+  top capture value.
 - Match-position and end-of-input controls: `\K`, `\G`, and
   `\Z`
 - PCRE-style control verbs: `(*FAIL)`, `(*SKIP)`,
   `(*PRUNE)`, `(*COMMIT)`, `(*THEN)`,
   `(*ACCEPT)`, and `(*MARK:tag)`, including their short
   aliases where defined by the parser
+- PCRE2-style callouts: `(?C)`, `(?Cn)`, `(?C"tag")`, `(?C'tag')`,
+  `(?C^tag^)`, `(?C%tag%)`, `(?C#tag#)`, `(?C$tag$)`, and `(?C{tag})` are zero-width
+  advanced nodes. A compiled expression accepts `:callout`, called as
+  `(number tag position text)`, returning `NIL` or `:continue` to continue
+  or `:fail` to reject the current path. Without a callback, callouts are
+  no-ops.
 
 The advanced executor honors `:size-limit` as a maximum evaluation-step
 budget and `:nest-limit` as the recursion-depth limit. A timeout can
@@ -138,10 +148,9 @@ portability boundary.
 ## Outside current dialect
 
 The advanced path deliberately stops short of embedding another language or
-running user code. PCRE callouts, Perl code interpolation, balancing groups,
-fuzzy matching, and control verbs not listed above are outside the current
-dialect. They should be rejected as syntax rather than silently compiled with
-different meaning.
+running arbitrary pattern code. Perl code interpolation, fuzzy matching, and
+control verbs not listed above are outside the current dialect. They should be
+rejected as syntax rather than silently compiled with different meaning.
 
 ## Why this trade
 

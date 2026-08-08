@@ -15,7 +15,10 @@ Parses and compiles `pattern` (a string) into a `regex` object ready for
 the compiler's resource limits. Builder options include `:case-insensitive`,
 `:multi-line`, `:dot-matches-new-line`, `:swap-greed`, `:ignore-whitespace`,
 `:unicode`, `:crlf`, `:octal`, `:line-terminator`, `:size-limit`, and
-`:nest-limit`, plus `:literal`, `:never-capture`, and `:never-newline`. For byte regexes,
+`:nest-limit`, and `:callout`, plus `:literal`, `:never-capture`, and
+`:never-newline`. `:callout` supplies an optional callback for advanced
+PCRE2-style callout nodes; it receives `(number tag position text)` and may
+return `NIL`, `:continue`, or `:fail`. For byte regexes,
 `:line-terminator` also accepts an integer octet from `0` through `255`. `:literal` treats all
 pattern text literally, without parsing syntax or extended-mode whitespace.
 `:never-capture` makes ordinary parenthesized groups non-capturing while

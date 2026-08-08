@@ -27,15 +27,19 @@
   group-names
   step-limit
   steps
-  nest-limit)
+  nest-limit
+  callout
+  (boundary-cache nil))
 
 (defstruct advanced-grapheme-unit character
   start
   end
   class
+  indic-conjunct-break
   extended-pictographic-p)
 
 (declaim (ftype function %advanced-node-evaluate))
+(declaim (ftype function %advanced-extended-pictographic-p %advanced-grapheme-class %advanced-indic-conjunct-break-class %advanced-grapheme-break-p))
 
 (define-condition advanced-regex-limit-error (cl-regex-kit-error)
   ((kind :initarg :kind :reader advanced-regex-limit-kind)
@@ -50,10 +54,46 @@
       (advanced-regex-limit condition)
       (advanced-regex-limit-used condition)))))
 
+(progn
+  (defun %advanced-copy-capture-stack (stack)
+    (mapcar
+     (lambda (entry)
+       (cons (car entry) (cdr entry)))
+     stack))
+  (defun %advanced-copy-capture-stacks (stacks)
+    (when stacks
+      (map (quote vector)
+           (function %advanced-copy-capture-stack)
+           stacks)))
+  (defun %advanced-copy-slots (slots)
+    (let ((copy (copy-seq slots)))
+      (when (and (plusp (length copy))
+                 (vectorp (aref copy (1- (length copy)))))
+        (setf (aref copy (1- (length copy)))
+              (%advanced-copy-capture-stacks
+               (aref copy (1- (length copy))))))
+      copy))
+  (defun %advanced-initialize-capture-stacks (slots highest-capture)
+  (setf (aref slots (* 2 (1+ highest-capture)))
+        (make-array (1+ highest-capture) :initial-element nil))
+  slots)
+  (defun %advanced-capture-stacks (state)
+    (let ((slots (advanced-state-slots state)))
+      (and (plusp (length slots))
+           (let ((stacks (aref slots (1- (length slots)))))
+             (and (vectorp stacks) stacks)))))
+  (defun %advanced-sync-capture-slot (state index)
+    (let* ((stacks (%advanced-capture-stacks state))
+           (stack (and stacks (aref stacks index)))
+           (top (first stack))
+           (slots (advanced-state-slots state)))
+      (setf (aref slots (* 2 index)) (and top (car top))
+            (aref slots (1+ (* 2 index))) (and top (cdr top)))
+      state)))
 (defun %advanced-state-copy (state)
   (%make-advanced-state
    (advanced-state-position state)
-   (copy-seq (advanced-state-slots state))
+   (%advanced-copy-slots (advanced-state-slots state))
    (advanced-state-control state)
    (advanced-state-skip-to state)
    (advanced-state-mark state)
@@ -98,15 +138,27 @@
 (defun %advanced-name= (left right)
   (and left right (string-equal (string left) (string right))))
 
-(defun %advanced-capture-index-by-name (name context)
-  (let ((entry
-         (find-if
-          (lambda (candidate)
-            (%advanced-name= name (car candidate)))
-          (advanced-context-group-names context))))
-    (when entry
-      (cdr entry))))
+(defun %advanced-capture-indices-by-name (name context)
+  (loop for candidate in (advanced-context-group-names context)
+        when (%advanced-name= name (car candidate))
+        collect (cdr candidate)))
+(defun %advanced-capture-participated-p (index state)
+  (let ((slots (advanced-state-slots state)))
+    (and (integerp index)
+         (<= 0 index)
+         (< (1+ (* 2 index)) (length slots))
+         (aref slots (* 2 index))
+         (aref slots (1+ (* 2 index))))))
 
+(defun %advanced-capture-index-by-name (name context &optional state)
+  (let ((indices (%advanced-capture-indices-by-name name context)))
+    (or
+     (and state
+          (find-if
+           (lambda (index)
+             (%advanced-capture-participated-p index state))
+           indices))
+     (car indices))))
 (defun %advanced-capture-index-for-group (group)
   (and group (group-node-capture-index group)))
 
@@ -170,7 +222,7 @@
          index)))
       (otherwise nil))))
 
-(defun %advanced-capture-index (node context)
+(defun %advanced-capture-index (node context &optional state)
   (or
    (and
     (backreference-node-capture-index node)
@@ -178,7 +230,10 @@
    (and
     (backreference-node-name node)
     (or
-     (%advanced-capture-index-by-name (backreference-node-name node) context)
+     (%advanced-capture-index-by-name
+      (backreference-node-name node)
+      context
+      state)
      (let ((group
             (%advanced-find-group
              (advanced-context-root context)
@@ -214,7 +269,7 @@
     (t nil)))
 
 (defun %advanced-backreference-result (node state context &optional (depth 0))
-  (let* ((index (%advanced-capture-index node context))
+  (let* ((index (%advanced-capture-index node context state))
          (slots (advanced-state-slots state))
          (from
           (and index (< (* 2 index) (length slots)) (aref slots (* 2 index))))
@@ -291,6 +346,245 @@
           (advanced-state-recursion-target state)
           (advanced-state-committed-p state)))))))
 
+(defstruct advanced-sentence-unit start end class)
+(defun %advanced-boundary-cache (context key producer)
+  (let ((cache (advanced-context-boundary-cache context)))
+    (unless (hash-table-p cache)
+      (setf cache (make-hash-table :test #'eq)
+            (advanced-context-boundary-cache context) cache))
+    (multiple-value-bind (value present-p)
+        (gethash key cache)
+      (if present-p
+          value
+          (setf (gethash key cache) (funcall producer))))))
+(defun %advanced-sentence-ignored-p (class)
+  (member class '(:extend :format) :test #'eq))
+(defun %advanced-sentence-paragraph-p (class)
+  (member class '(:cr :lf :sep) :test #'eq))
+(defun %advanced-sentence-terminal-p (class)
+  (member class '(:aterm :sterm) :test #'eq))
+(defun %advanced-sentence-unit-at (context position)
+  (multiple-value-bind (character end valid-p)
+      (%advanced-read-element context position t)
+    (when (and valid-p (characterp character))
+      (make-advanced-sentence-unit
+       :start position
+       :end end
+       :class (sb-unicode:sentence-break-class character)))))
+(defun %advanced-sentence-significant-before (units index)
+  (loop for cursor = (min index (1- (length units)))
+          then (1- cursor)
+        while (>= cursor 0)
+        unless (%advanced-sentence-ignored-p
+                (advanced-sentence-unit-class (aref units cursor)))
+          return cursor))
+(defun %advanced-sentence-terminal-prefix-p (units left-index spaces-p)
+  (let ((cursor left-index))
+    (loop
+      (when (< cursor 0)
+        (return nil))
+      (let ((class (advanced-sentence-unit-class (aref units cursor))))
+        (cond
+          ((%advanced-sentence-ignored-p class)
+           (decf cursor))
+          ((and spaces-p (eq class :sp))
+           (decf cursor))
+          ((eq class :close)
+           (decf cursor))
+          ((%advanced-sentence-terminal-p class)
+           (return t))
+          (t
+           (return nil)))))))
+(defun %advanced-sentence-aterm-before-lower-p (units left-index)
+  (let ((cursor left-index))
+    (loop
+      (when (< cursor 0)
+        (return nil))
+      (let ((class (advanced-sentence-unit-class (aref units cursor))))
+        (cond
+          ((%advanced-sentence-ignored-p class)
+           (decf cursor))
+          ((eq class :aterm)
+           (return t))
+          ((member class '(:oletter :upper :lower :cr :lf :sep :sterm)
+                   :test #'eq)
+           (return nil))
+          (t
+           (decf cursor)))))))
+(defun %advanced-sentence-upper-aterm-before-upper-p (units left-index)
+  (let ((aterm-index (%advanced-sentence-significant-before units left-index)))
+    (and aterm-index
+         (eq (advanced-sentence-unit-class (aref units aterm-index)) :aterm)
+         (let ((previous-index
+                 (%advanced-sentence-significant-before units
+                                                        (1- aterm-index))))
+           (and previous-index
+                (member
+                 (advanced-sentence-unit-class (aref units previous-index))
+                 '(:upper :lower)
+                 :test #'eq))))))
+(defun %advanced-sentence-boundary-rule (units left-index right-index)
+  (let* ((right-class
+           (advanced-sentence-unit-class (aref units right-index)))
+         (left-significant-index
+           (%advanced-sentence-significant-before units left-index))
+         (left-class
+           (and left-significant-index
+                (advanced-sentence-unit-class
+                 (aref units left-significant-index))))
+         (terminal-p
+           (%advanced-sentence-terminal-prefix-p units left-index nil))
+         (terminal-with-spaces-p
+           (%advanced-sentence-terminal-prefix-p units left-index t)))
+    (cond
+      ((and (eq left-class :cr) (eq right-class :lf))
+       nil)
+      ((%advanced-sentence-paragraph-p left-class)
+       t)
+      ((and (eq left-class :aterm) (eq right-class :numeric))
+       nil)
+      ((and (eq right-class :upper)
+            (%advanced-sentence-upper-aterm-before-upper-p units left-index))
+       nil)
+      ((and (eq right-class :lower)
+            (%advanced-sentence-aterm-before-lower-p units left-index))
+       nil)
+      ((and terminal-with-spaces-p
+            (member right-class '(:scontinue :sterm) :test #'eq))
+       nil)
+      ((and terminal-p
+            (member right-class '(:close :sp :sep) :test #'eq))
+       nil)
+      ((and terminal-with-spaces-p
+            (member right-class '(:sp :sep) :test #'eq))
+       nil)
+      (terminal-with-spaces-p
+       t)
+      (terminal-p
+       t)
+      (t
+       nil))))
+(defun %advanced-sentence-boundary-between-p (units right-index)
+  (let* ((left-index (1- right-index))
+         (left-class
+           (advanced-sentence-unit-class (aref units left-index)))
+         (right-class
+           (advanced-sentence-unit-class (aref units right-index))))
+    (cond
+      ((and (eq left-class :cr) (eq right-class :lf))
+       nil)
+      ((%advanced-sentence-paragraph-p left-class)
+       t)
+      ((%advanced-sentence-ignored-p right-class)
+       nil)
+      (t
+       (%advanced-sentence-boundary-rule units left-index right-index)))))
+(defun %advanced-sentence-boundaries (context)
+  (let* ((limit (advanced-context-limit context))
+         (boundaries (make-array (1+ limit) :initial-element nil))
+         (units nil)
+         (position 0)
+         (valid-p t))
+    (setf (aref boundaries 0) t)
+    (loop while (< position limit)
+          do (let ((unit (%advanced-sentence-unit-at context position)))
+               (unless unit
+                 (setf valid-p nil)
+                 (return))
+               (push unit units)
+               (setf position (advanced-sentence-unit-end unit))))
+    (if (not valid-p)
+        (make-array (1+ limit) :initial-element t)
+        (let ((units (coerce (nreverse units) 'vector)))
+          (setf (aref boundaries limit) t)
+          (loop for index from 1 below (length units)
+                for start = (advanced-sentence-unit-start (aref units index))
+                do (setf (aref boundaries start)
+                         (%advanced-sentence-boundary-between-p units index)))
+          boundaries))))
+(defun %advanced-sentence-boundary-p (context position unicode-p)
+  (if (not unicode-p)
+      t
+      (let ((boundaries
+              (%advanced-boundary-cache
+               context
+               :sentence
+               (lambda ()
+                 (%advanced-sentence-boundaries context)))))
+        (and (<= 0 position)
+             (< position (length boundaries))
+             (aref boundaries position)))))
+(defun %advanced-grapheme-boundary-unit-at (context position)
+  (multiple-value-bind (character end valid-p)
+      (%advanced-read-element context position t)
+    (when (and valid-p (characterp character))
+      (make-advanced-grapheme-unit
+       :character character
+       :start position
+       :end end
+       :class (%advanced-grapheme-class character)
+       :indic-conjunct-break (%advanced-indic-conjunct-break-class character)
+       :extended-pictographic-p
+       (%advanced-extended-pictographic-p character)))))
+(defun %advanced-grapheme-boundary-p (context position unicode-p)
+  (let ((limit (advanced-context-limit context)))
+    (cond
+      ((not unicode-p)
+       t)
+      ((or (zerop position) (= position limit))
+       t)
+      ((or (< position 0) (> position limit))
+       nil)
+      (t
+       (let ((cursor 0)
+             (units nil))
+         (loop while (< cursor limit)
+               do (let ((unit
+                          (%advanced-grapheme-boundary-unit-at
+                           context cursor)))
+                    (unless unit
+                      (return-from %advanced-grapheme-boundary-p t))
+                    (let ((end (advanced-grapheme-unit-end unit)))
+                      (cond
+                        ((= cursor position)
+                         (return-from
+                             %advanced-grapheme-boundary-p
+                           (%advanced-grapheme-break-p units unit t)))
+                        ((> end position)
+                         (return-from %advanced-grapheme-boundary-p nil))
+                        (t
+                         (push unit units)
+                         (setf cursor end))))))
+         t)))))
+(defun %advanced-word-boundary-p (context position unicode-p)
+  (let ((text (advanced-context-text context))
+        (limit (advanced-context-limit context)))
+    (if (stringp text)
+        (word-boundary-p text position unicode-p)
+        (if unicode-p
+            (%byte-unicode-word-boundary-p text position)
+            (let ((before
+                    (and (plusp position)
+                         (byte-word-character-p
+                          (aref text (1- position)))))
+                  (after
+                    (and (< position limit)
+                         (byte-word-character-p
+                          (aref text position)))))
+              (not (eq before after)))))))
+(defun %advanced-special-boundary-p (node context position)
+  (case (anchor-node-kind node)
+    (:grapheme-boundary
+     (%advanced-grapheme-boundary-p
+      context position (anchor-node-unicode-p node)))
+    (:word-boundary-unicode
+     (%advanced-word-boundary-p
+      context position (anchor-node-unicode-p node)))
+    (:sentence-boundary
+     (%advanced-sentence-boundary-p
+      context position (anchor-node-unicode-p node)))
+    (otherwise
+     nil)))
 (defun %advanced-anchor-result (node state context)
   (let ((kind (anchor-node-kind node))
         (position (advanced-state-position state)))
@@ -319,6 +613,13 @@
                        (- limit 2))
                       (t (1- limit))))
              (list state)))))
+      ((member kind
+               '(:grapheme-boundary
+                 :word-boundary-unicode
+                 :sentence-boundary)
+               :test #'eq)
+       (when (%advanced-special-boundary-p node context position)
+         (list state)))
       (t
        (let* ((bits
                (logior
@@ -350,6 +651,9 @@
 (defun %advanced-control-result (node state)
   (let* ((name (%advanced-control-name (control-verb-node-verb node)))
          (argument (control-verb-node-argument node))
+         (mark (advanced-state-mark state))
+         (mark-state (if (consp mark) mark (cons mark nil)))
+         (mark-positions (cdr mark-state))
          (control
           (cond
             ((member name (list "FAIL" "F") :test (function string=)) :fail)
@@ -369,23 +673,64 @@
          (advanced-state-slots state)
          nil
          nil
-         argument
+         (cons
+          argument
+          (acons
+           argument
+           (advanced-state-position state)
+           (remove
+            argument
+            mark-positions
+            :key (function car)
+            :test (function equal))))
          (advanced-state-reported-start state)
          (advanced-state-recursion-depth state)
          (advanced-state-recursion-target state)
          (advanced-state-committed-p state))))
       (otherwise
-       (list
-        (%make-advanced-state
-         (advanced-state-position state)
-         (advanced-state-slots state)
-         control
-         (and (integerp argument) argument)
-         (or argument (advanced-state-mark state))
-         (advanced-state-reported-start state)
-         (advanced-state-recursion-depth state)
-         (advanced-state-recursion-target state)
-         (or (advanced-state-committed-p state) (eq control :commit))))))))
+       (let ((skip-to
+               (if (eq control :skip)
+                   (cond
+                     ((null argument) (advanced-state-position state))
+                     ((stringp argument)
+                      (let ((entry
+                              (assoc
+                               argument
+                               mark-positions
+                               :test (function equal))))
+                        (and entry (cdr entry))))
+                     ((integerp argument) argument)
+                     (t nil))
+                   (and (integerp argument) argument))))
+         (list
+          (%make-advanced-state
+           (advanced-state-position state)
+           (advanced-state-slots state)
+           control
+           skip-to
+           mark
+           (advanced-state-reported-start state)
+           (advanced-state-recursion-depth state)
+           (advanced-state-recursion-target state)
+           (or (advanced-state-committed-p state) (eq control :commit)))))))))
+
+
+(defun %advanced-callout-result (node state context)
+  (let ((callout (advanced-context-callout context)))
+    (if (null callout)
+        (list state)
+        (let ((decision
+                (funcall callout
+                         (callout-node-number node)
+                         (callout-node-tag node)
+                         (advanced-state-position state)
+                         (advanced-context-text context))))
+          (cond
+            ((or (null decision) (eq decision :continue))
+             (list state))
+            ((eq decision :fail) nil)
+            (t
+             (error "Callout callback must return NIL, :CONTINUE, or :FAIL")))))))
 
 (defun %advanced-evaluate-concat (children state context depth)
   (labels ((commit-continuation (candidate)
@@ -545,27 +890,43 @@
         (expand state 0)))))
 
 (defun %advanced-group-result (node state context depth)
-  (let ((index (group-node-capture-index node)))
-    (if (null index) (%advanced-node-evaluate
-                      (group-node-child node)
-                      state
-                      context
-                      (1+ depth))
-      (let* ((entered (%advanced-state-copy state))
-             (slots (advanced-state-slots entered)))
-        (setf (aref slots (* 2 index)) (advanced-state-position state)
-              (aref slots (1+ (* 2 index))) nil)
-        (mapcar
-         (lambda (candidate)
-           (let ((result (%advanced-state-copy candidate)))
-             (setf (aref (advanced-state-slots result) (1+ (* 2 index))) (advanced-state-position
-                                                                          candidate))
-             result))
-         (%advanced-node-evaluate
-          (group-node-child node)
-          entered
-          context
-          (1+ depth)))))))
+  (let* ((index (group-node-capture-index node))
+         (balance-name (group-node-balance-name node))
+         (balance-index
+           (and balance-name
+                (%advanced-capture-index-by-name balance-name context))))
+    (when (and balance-name (null balance-index))
+      (return-from %advanced-group-result nil))
+    (let ((entered (%advanced-state-copy state)))
+      (when balance-name
+        (let ((stacks (%advanced-capture-stacks entered)))
+          (unless (and stacks (aref stacks balance-index))
+            (return-from %advanced-group-result nil))
+          (pop (aref stacks balance-index))
+          (%advanced-sync-capture-slot entered balance-index)))
+      (when index
+        (let ((stacks (%advanced-capture-stacks entered)))
+          (unless stacks
+            (return-from %advanced-group-result nil))
+          (push (cons (advanced-state-position state) nil)
+                (aref stacks index))
+          (%advanced-sync-capture-slot entered index)))
+      (mapcar
+       (lambda (candidate)
+         (let ((result (%advanced-state-copy candidate)))
+           (when index
+             (let* ((stacks (%advanced-capture-stacks result))
+                    (stack (and stacks (aref stacks index)))
+                    (top (first stack)))
+               (when top
+                 (setf (cdr top) (advanced-state-position candidate))
+                 (%advanced-sync-capture-slot result index))))
+           result))
+       (%advanced-node-evaluate
+        (group-node-child node)
+        entered
+        context
+        (1+ depth))))))
 
 (defun %advanced-assertion-success (state outer-position)
   (let ((result (%advanced-state-copy state)))
@@ -574,62 +935,9 @@
           (advanced-state-skip-to result) nil)
     result))
 
-(defun %advanced-forward-assertion (node state context depth)
-  (let* ((outer-position (advanced-state-position state))
-         (results
-          (%advanced-node-evaluate
-           (assertion-node-child node)
-           (%advanced-state-copy state)
-           context
-           (1+ depth)))
-         (success
-          (find-if
-           (lambda (candidate)
-             (or
-              (%advanced-state-normal-p candidate)
-              (eq (advanced-state-control candidate) :accept)))
-           results)))
-    (if (assertion-node-negative-p node) (unless success
-                                           (list state))
-      (when success
-        (list (%advanced-assertion-success success outer-position))))))
+(defun %advanced-forward-assertion (node state context depth) (let* ((outer-position (advanced-state-position state)) (results (%advanced-node-evaluate (assertion-node-child node) (%advanced-state-copy state) context (1+ depth))) (successes (remove-if-not (lambda (candidate) (or (%advanced-state-normal-p candidate) (eq (advanced-state-control candidate) :accept))) results))) (if (assertion-node-negative-p node) (unless successes (list state)) (when successes (if (assertion-node-non-atomic-p node) (mapcar (lambda (candidate) (%advanced-assertion-success candidate outer-position)) successes) (list (%advanced-assertion-success (first successes) outer-position)))))))
 
-(defun %advanced-backward-assertion (node state context depth)
-  (let* ((outer-position (advanced-state-position state))
-         (fixed-length (assertion-node-fixed-length node))
-         (starts
-          (if (and (integerp fixed-length) (>= fixed-length 0)) (list
-                                                                 (max
-                                                                  0
-                                                                  (-
-                                                                   outer-position
-                                                                   fixed-length)))
-            (loop for position from 0 below (1+ outer-position)
-                  collect position)))
-         (success nil))
-    (dolist (candidate-start starts)
-      (unless success
-        (let* ((candidate-state (%advanced-state-copy state))
-               (results
-                (%advanced-node-evaluate
-                 (assertion-node-child node)
-                 (progn (setf (advanced-state-position candidate-state) candidate-start) candidate-state)
-                 context
-                 (1+ depth))))
-          (when (some
-                 (lambda (candidate)
-                   (= (advanced-state-position candidate) outer-position))
-                 results)
-            (setf success (find-if
-                           (lambda (candidate)
-                             (=
-                              (advanced-state-position candidate)
-                              outer-position))
-                           results))))))
-    (if (assertion-node-negative-p node) (unless success
-                                           (list state))
-      (when success
-        (list (%advanced-assertion-success success outer-position))))))
+(defun %advanced-backward-assertion (node state context depth) (let* ((outer-position (advanced-state-position state)) (fixed-length (assertion-node-fixed-length node)) (starts (if (and (integerp fixed-length) (>= fixed-length 0)) (list (max 0 (- outer-position fixed-length))) (loop for position from 0 below (1+ outer-position) collect position))) (successes nil)) (dolist (candidate-start starts) (let* ((candidate-state (%advanced-state-copy state)) (results (%advanced-node-evaluate (assertion-node-child node) (progn (setf (advanced-state-position candidate-state) candidate-start) candidate-state) context (1+ depth))) (matching (remove-if-not (lambda (candidate) (= (advanced-state-position candidate) outer-position)) results))) (if (assertion-node-non-atomic-p node) (setf successes (nconc successes matching)) (when matching (setf successes (list (first matching))) (return))))) (if (assertion-node-negative-p node) (unless successes (list state)) (when successes (if (assertion-node-non-atomic-p node) (mapcar (lambda (candidate) (%advanced-assertion-success candidate outer-position)) successes) (list (%advanced-assertion-success (first successes) outer-position)))))))
 
 (defun %advanced-assertion-result (node state context depth)
   (if (member
@@ -655,10 +963,72 @@
         (if (string= name "REGIONALINDICATOR") "RI" name))
       "OTHER"))
 
-(defun %advanced-extended-pictographic-p (character)
-  (and
-   (characterp character)
-   (range-matches-p +extended-pictographic-ranges+ character)))
+(progn
+  (defparameter +advanced-indic-consonant-ranges+
+    (quote ((#x0915 . #x0939)
+            (#x0958 . #x095F)
+            (#x0978 . #x097F)
+            (#x0995 . #x09A8)
+            (#x09AA . #x09B0)
+            (#x09B2 . #x09B2)
+            (#x09B6 . #x09B9)
+            (#x09DC . #x09DD)
+            (#x09DF . #x09DF)
+            (#x09F0 . #x09F1)
+            (#x0A95 . #x0AA8)
+            (#x0AAA . #x0AB0)
+            (#x0AB2 . #x0AB3)
+            (#x0AB5 . #x0AB9)
+            (#x0AF9 . #x0AF9)
+            (#x0B15 . #x0B28)
+            (#x0B2A . #x0B30)
+            (#x0B32 . #x0B33)
+            (#x0B35 . #x0B39)
+            (#x0B5C . #x0B5D)
+            (#x0B5F . #x0B5F)
+            (#x0B71 . #x0B71)
+            (#x0C15 . #x0C28)
+            (#x0C2A . #x0C39)
+            (#x0C58 . #x0C5A)
+            (#x0D15 . #x0D3A))))
+  (defparameter +advanced-indic-linker-ranges+
+    (quote ((#x094D . #x094D)
+            (#x09CD . #x09CD)
+            (#x0ACD . #x0ACD)
+            (#x0B4D . #x0B4D)
+            (#x0C4D . #x0C4D)
+            (#x0D4D . #x0D4D))))
+  (defun %advanced-extended-pictographic-p (character)
+    (and
+     (characterp character)
+     (range-matches-p +extended-pictographic-ranges+ character)))
+  (defun %advanced-indic-conjunct-break-class (character grapheme-class)
+    (cond
+      ((not (characterp character)) "NONE")
+      ((range-matches-p +advanced-indic-linker-ranges+ character) "LINKER")
+      ((range-matches-p +advanced-indic-consonant-ranges+ character) "CONSONANT")
+      ((and
+        (or (string= grapheme-class "EXTEND")
+            (string= grapheme-class "ZWJ"))
+        (/= (char-code character) #x200C))
+       "EXTEND")
+      (t "NONE")))
+  (defun %advanced-indic-conjunct-break-p (units next)
+    (and
+     (string= (advanced-grapheme-unit-indic-conjunct-break next) "CONSONANT")
+     (loop
+       with linker-p = nil
+       for unit in units
+       for class = (advanced-grapheme-unit-indic-conjunct-break unit)
+       while (member class (quote ("EXTEND" "LINKER"))
+                       :test (function string=))
+       do (when (string= class "LINKER")
+            (setf linker-p t))
+       finally
+         (return
+           (and
+            linker-p
+            (string= class "CONSONANT")))))))
 
 (defun %advanced-grapheme-unit-at (node position context)
   (multiple-value-bind (character end valid-p) (%advanced-read-element
@@ -666,17 +1036,20 @@
                                                 position
                                                 (grapheme-node-unicode-p node))
     (when valid-p
-      (make-advanced-grapheme-unit
-       :character
-       character
-       :start
-       position
-       :end
-       end
-       :class
-       (%advanced-grapheme-class character)
-       :extended-pictographic-p
-       (%advanced-extended-pictographic-p character)))))
+      (let ((class (%advanced-grapheme-class character)))
+        (make-advanced-grapheme-unit
+         :character
+         character
+         :start
+         position
+         :end
+         end
+         :class
+         class
+         :indic-conjunct-break
+         (%advanced-indic-conjunct-break-class character class)
+         :extended-pictographic-p
+         (%advanced-extended-pictographic-p character))))))
 
 (defun %advanced-grapheme-break-p (units next extended-p)
   (let* ((previous (car units))
@@ -685,26 +1058,34 @@
     (cond
       ((and (string= previous-class "CR") (string= next-class "LF")) nil)
       ((or
-        (member previous-class '("CR" "LF" "CONTROL") :test #'string=)
-        (member next-class '("CR" "LF" "CONTROL") :test #'string=))
+        (member previous-class (quote ("CR" "LF" "CONTROL"))
+                :test (function string=))
+        (member next-class (quote ("CR" "LF" "CONTROL"))
+                :test (function string=)))
        t)
       ((and
         (string= previous-class "L")
-        (member next-class '("L" "V" "LV" "LVT") :test #'string=))
+        (member next-class (quote ("L" "V" "LV" "LVT"))
+                :test (function string=)))
        nil)
       ((and
-        (member previous-class '("LV" "V") :test #'string=)
-        (member next-class '("V" "T") :test #'string=))
+        (member previous-class (quote ("LV" "V"))
+                :test (function string=))
+        (member next-class (quote ("V" "T"))
+                :test (function string=)))
        nil)
       ((and
-        (member previous-class '("LVT" "T") :test #'string=)
+        (member previous-class (quote ("LVT" "T"))
+                :test (function string=))
         (string= next-class "T"))
        nil)
-      ((member next-class '("EXTEND" "ZWJ") :test #'string=) nil)
-      ((string= next-class "SPACINGMARK") nil)
-      ((string= previous-class "PREPEND") nil)
+      ((member next-class (quote ("EXTEND" "ZWJ"))
+               :test (function string=))
+       nil)
+      ((and extended-p (string= next-class "SPACINGMARK")) nil)
+      ((and extended-p (string= previous-class "PREPEND")) nil)
+      ((and extended-p (%advanced-indic-conjunct-break-p units next)) nil)
       ((and
-        extended-p
         (advanced-grapheme-unit-extended-pictographic-p next)
         (string= previous-class "ZWJ")
         (loop for unit in (cdr units)
@@ -803,13 +1184,25 @@
       (member (first condition)
               (quote (:capture-index :name))
               :test (function eq)))
-     (let* ((index (%advanced-condition-capture-index condition context))
-            (slots (advanced-state-slots state)))
-       (and
-        index
-        (< (1+ (* 2 index)) (length slots))
-        (aref slots (* 2 index))
-        (aref slots (1+ (* 2 index))))))
+     (let ((indices
+            (case (first condition)
+              (:capture-index
+               (list (second condition)))
+              (:name
+               (or
+                (%advanced-capture-indices-by-name (second condition) context)
+                (let ((group
+                       (%advanced-find-group
+                        (advanced-context-root context)
+                        :name
+                        (second condition))))
+                  (and
+                   group
+                   (list (%advanced-capture-index-for-group group)))))))))
+       (some
+        (lambda (index)
+          (%advanced-capture-participated-p index state))
+        indices)))
     ((typep condition (quote regex-node))
      (some
       (function %advanced-state-normal-p)
@@ -856,7 +1249,7 @@
        (subroutine-node-target node)))
     (let* ((entry-depth (or (advanced-state-recursion-depth state) 0))
            (entry-target (advanced-state-recursion-target state))
-           (entry-slots (copy-seq (advanced-state-slots state)))
+           (entry-slots (%advanced-copy-slots (advanced-state-slots state)))
            (target-index
              (and
               (typep target (quote group-node))
@@ -883,6 +1276,23 @@
                (advanced-state-slots result)
                (1+ (* 2 target-index)))
               (aref entry-slots (1+ (* 2 target-index)))))
+           (let ((result-stacks (%advanced-capture-stacks result))
+                 (entry-stacks
+                   (and
+                    (plusp (length entry-slots))
+                    (let ((stacks
+                            (aref entry-slots (1- (length entry-slots)))))
+                      (and (vectorp stacks) stacks)))))
+             (when
+                 (and
+                  (integerp target-index)
+                  result-stacks
+                  entry-stacks)
+               (setf
+                (aref result-stacks target-index)
+                (%advanced-copy-capture-stack
+                 (aref entry-stacks target-index)))
+               (%advanced-sync-capture-slot result target-index)))
            result))
        (%advanced-node-evaluate target recursive-state context (1+ depth))))))
 
@@ -928,22 +1338,26 @@
     (grapheme-node (%advanced-grapheme-result node state context))
     (conditional-node (%advanced-conditional-result node state context depth))
     (subroutine-node (%advanced-subroutine-result node state context depth))
+    (callout-node (%advanced-callout-result node state context))
     (control-verb-node (%advanced-control-result node state))
     (otherwise (error "Unknown advanced regex AST node: ~S" node))))
 
 (defun %advanced-result-from-state (state start group-count group-names)
   (let* ((slots (copy-seq (advanced-state-slots state)))
          (slot-count (* 2 (1+ group-count)))
-         (reported-start (or (advanced-state-reported-start state) start)))
+         (reported-start (or (advanced-state-reported-start state) start))
+         (mark (advanced-state-mark state))
+         (mark-name (if (consp mark) (car mark) mark)))
     (setf (aref slots 0) reported-start
           (aref slots 1) (advanced-state-position state))
     (let ((result
            (make-match-result-from-slots
             slots
             slot-count
-            (advanced-state-mark state))))
+            mark-name)))
       (setf (match-result-group-names result) (copy-tree group-names))
       result)))
+
 
 (defun %advanced-result-end (state)
   (advanced-state-position state))
@@ -1015,30 +1429,19 @@ RUN-PIKE-VM."
            (highest-capture (max 0 (ast-group-count ast) group-count))
            (context
             (make-advanced-context
-             :text
-             text
-             :search-start
-             start
-             :limit
-             limit
-             :text-length
-             text-length
-             :byte-mode-p
-             byte-mode-p
-             :never-newline-p
-             never-newline-p
-             :root
-             ast
-             :group-count
-             highest-capture
-             :group-names
-             group-names
-             :step-limit
-             step-limit
-             :steps
-             0
-             :nest-limit
-             nest-limit)))
+             :text text
+             :search-start start
+             :limit limit
+             :text-length text-length
+             :byte-mode-p byte-mode-p
+             :never-newline-p never-newline-p
+             :root ast
+             :group-count highest-capture
+             :group-names group-names
+             :step-limit step-limit
+             :steps 0
+             :nest-limit nest-limit
+             :callout (regex-callout regex))))
       (unless (and
                (integerp start)
                (integerp limit)
@@ -1047,10 +1450,12 @@ RUN-PIKE-VM."
       (loop with candidate = start
             while (<= candidate limit)
             do (let* ((slots
-                       (make-array
-                        (* 2 (1+ highest-capture))
-                        :initial-element
-                        nil))
+                       (%advanced-initialize-capture-stacks
+                         (make-array
+                          (1+ (* 2 (1+ highest-capture)))
+                          :initial-element
+                          nil)
+                         highest-capture))
                       (seed
                        (%make-advanced-state
                         candidate
