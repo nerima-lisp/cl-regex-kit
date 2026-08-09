@@ -1,5 +1,7 @@
 (in-package #:cl-regex-kit)
 
+(declaim (ftype function run-advanced-regex))
+
 (defun validate-input-range (text start end)
   "Validate a half-open input range and return its exclusive end."
   (unless (and (integerp start) (<= 0 start (length text)))
@@ -105,37 +107,13 @@ RUN-PIKE-VM invoked, not how to get there."
   (let ((limit (validate-text-range regex text start end)))
     (call-with-timeout timeout (lambda () (funcall thunk limit)))))
 
-(defun %call-advanced-regex-runner
-    (regex text start end &key shortest-p longest-p)
-  "Invoke RUN-ADVANCED-REGEX, the optional advanced execution backend.
-
-The backend contract is:
-  (run-advanced-regex regex text &key start end shortest-p longest-p
-                      never-newline-p)
-It returns a MATCH-RESULT or NIL, just like RUN-PIKE-VM. REGEX carries
-the AST and advanced resource limits in REGEX-ADVANCED-STEP-LIMIT and
-REGEX-ADVANCED-NEST-LIMIT; the backend is responsible for consuming those
-limits. This lookup is intentionally dynamic because ASDF loads API-MATCH
-before any optional advanced backend. Ordinary regexes do not call this
-function."
-  (let ((runner (and (fboundp (quote run-advanced-regex))
-                     (symbol-function (quote run-advanced-regex)))))
-    (unless runner
-      (error "Advanced regex runner RUN-ADVANCED-REGEX is not loaded."))
-    (funcall runner regex text
-             :start start
-             :end end
-             :shortest-p shortest-p
-             :longest-p longest-p
-             :never-newline-p (regex-never-newline-p regex))))
-
 (defmacro with-pike-vm-match ((result regex text start end timeout &rest vm-keys) &body body)
   "Bind RESULT to the MATCH-RESULT (or NIL) in TEXT within the validated
 [START, END) range, then evaluate BODY. RESULT is intentional anaphora: BODY
 names it to read the outcome, exactly like the LET it replaces.
 
 Expands to a CALL-WITH-VALIDATED-MATCH invocation whose continuation dispatches
-advanced regexes to %CALL-ADVANCED-REGEX-RUNNER, while ordinary regexes use
+advanced regexes directly to RUN-ADVANCED-REGEX, while ordinary regexes use
 RUN-PIKE-VM with the :start/:end/:never-newline-p arguments every SCAN-shaped
 entry point supplies, plus VM-KEYS for the one flag (:shortest-p or
 :longest-p) that distinguishes it from a plain leftmost-first SCAN. This is
@@ -160,8 +138,12 @@ written, regardless of how many times the expansion below references them."
                ,regex-var ,text-var ,start-var ,end-var ,timeout-var
                (lambda (limit)
                  (if (regex-advanced-p ,regex-var)
-                     (%call-advanced-regex-runner
-                      ,regex-var ,text-var ,start-var limit
+                     (run-advanced-regex
+                      ,regex-var
+                      ,text-var
+                      :start ,start-var
+                      :end limit
+                      :never-newline-p (regex-never-newline-p ,regex-var)
                       ,@vm-keys)
                      (run-pike-vm (regex-program ,regex-var) ,text-var
                                   :start ,start-var

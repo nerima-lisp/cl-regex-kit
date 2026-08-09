@@ -449,13 +449,7 @@
        (compile-regex pattern))
      nil))
    (unless (zerop calls)
-     (error "Size-limit rejection compiled ~D member patterns" calls)))
- (signals
-  error
-  (cl-regex-kit::compile-regex-set-chunk (vector "a") 0 1 #'compile-regex nil 2))
- (signals
-  type-error
-  (cl-regex-kit::compile-regex-set-chunk (vector "a") 0 1 #'compile-regex nil 9)))
+     (error "Size-limit rejection compiled ~D member patterns" calls))))
 
 (it
  "selects default regex-set compilation parallelism from work size"

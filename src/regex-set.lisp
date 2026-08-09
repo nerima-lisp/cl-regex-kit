@@ -61,49 +61,6 @@
        1)
       (t (min count +regex-set-max-parallelism+)))))
 
-(defun compile-regex-set-chunk (pattern-vector
-                                start
-                                end
-                                compiler
-                                options
-                                parallelism
-                                &optional
-                                executor)
-  "Compile PATTERN-VECTOR members in [START, END) concurrently and preserve order."
-  (check-type parallelism (integer 1 *))
-  (when (> parallelism +regex-set-max-parallelism+)
-    (error
-     'type-error
-     :datum
-     parallelism
-     :expected-type
-     (list 'integer 1 +regex-set-max-parallelism+)))
-  (if (= start end) #()
-    (let ((patterns
-           (make-array
-            (- end start)
-            :displaced-to
-            pattern-vector
-            :displaced-index-offset
-            start)))
-      (if (= parallelism 1) (map
-                             'vector
-                             (lambda (pattern)
-                               (apply compiler pattern options))
-                             patterns)
-        (progn
-          (unless executor
-            (error "A non-NIL executor is required for parallel compilation."))
-          (coerce
-           (cl-concurrent-kit:executor-map
-            executor
-            (lambda (pattern)
-              (apply compiler pattern options))
-            patterns
-            :max-in-flight
-            parallelism)
-           'vector))))))
-
 (defun compile-regex-set-with (patterns options compiler byte-mode-p)
   "Compile PATTERNS with COMPILER into a REGEX-SET.
 

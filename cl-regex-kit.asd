@@ -40,6 +40,7 @@
                (:file "regex-tokenizer")
                (:file "regex-grammar-support")
                (:file "regex-grammar")
+               (:file "regex-grammar-groups")
                (:file "regex-grammar-classes")
                (:file "nfa")
                (:module
@@ -56,6 +57,7 @@
                (:file "api")
                (:file "api-match")
                (:file "advanced-match")
+               (:file "advanced-runner")
                (:file "api-operations")
                (:file "api-replace")
                (:file "regex-set"))
@@ -92,6 +94,7 @@
   :serial t
   :components ((:file "package")
                (:file "matchers")
+               (:file "advanced-cases-test")
                (:file "ast-test")
                (:file "parser-test")
                (:file "nfa-test")

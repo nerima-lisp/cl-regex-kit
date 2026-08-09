@@ -140,8 +140,9 @@ The ASDF system loads the implementation in these broad layers:
   resolution logic.
 - **Tokenizer/grammar boundary:** `parser-syntax.lisp`,
   `regex-tokenizer-escapes.lisp`, and `regex-tokenizer.lisp` turn pattern text
-  into tokens. `regex-grammar-support.lisp`, `regex-grammar.lisp`, and
-  `regex-grammar-classes.lisp` consume those tokens and build the AST.
+  into tokens. `regex-grammar-support.lisp`, `regex-grammar.lisp`,
+  `regex-grammar-groups.lisp`, and `regex-grammar-classes.lisp` consume those
+  tokens and build the AST.
 - **Compilation:** `nfa.lisp` compiles the AST into a Thompson-style instruction
   program.
 - **Pike VM:** `pike-vm-instructions.lisp` implements instruction matching;
@@ -149,7 +150,9 @@ The ASDF system loads the implementation in these broad layers:
   the capture-aware VM; and `pike-vm-set.lisp` runs merged regex-set programs.
 - **Public API:** `api.lisp`, `api-match.lisp`, `api-operations.lisp`, and
   `api-replace.lisp` provide compiled regexes and operations. `regex-set.lisp`
-  provides the regex-set API.
+  provides the regex-set API. `advanced-match.lisp` contains the bounded AST
+  evaluator, while `advanced-runner.lisp` owns input validation and the
+  leftmost-result orchestration around it.
 
 Unicode property domains depend on SBCL's Unicode tables. Enumerating finite
 runtime domains also inspects internal `SB-KERNEL` function return-type

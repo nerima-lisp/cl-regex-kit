@@ -67,7 +67,9 @@ stream. With TYPE, whether the next significant token has that type."
   (logtest flag *regex-flags*))
 
 (defun digit-token-p (token)
-  (and (eq (token-type token) :char) (digit-char-p (token-value token))))
+  (and token
+       (eq (token-type token) :char)
+       (digit-char-p (token-value token))))
 
 (defun ensure-byte-character (character)
   (when (and

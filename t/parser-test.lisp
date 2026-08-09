@@ -125,6 +125,10 @@
                  ("(?[[a-z]&[d-f]])" ("d" "f") ("a" "x"))
                  ("(?[[a-c]-[b-d]])" ("a") ("b" "d"))
                  ("(?[[a-c]^[b-d]])" ("a" "d") ("b" "c"))
+                 ("(?[[a-c]&&[b-c]])" ("b" "c") ("a" "x"))
+                 ("(?[[a-c]~~[b-c]])" ("a") ("b" "x"))
+                 ("(?[[a-c]--[b-c]])" ("a") ("b" "x"))
+                 ("(?[[a-c]||[x]])" ("a" "c" "x") ("d" "w"))
                  ("(?[![a]])" ("b") ("a"))))
     (destructuring-bind (pattern members non-members) row
       (let ((regex (compile-regex pattern)))
@@ -144,6 +148,16 @@
     (expect (full-match regex "5") :to-be-truthy)
     (expect (full-match regex "x") :to-be-falsy)))
 
+(it "handles empty and escaped atoms in extended character classes"
+  (let ((regex (compile-regex "(?[])")))
+    (expect-not "" :to-match-regex regex)
+    (expect-not "a" :to-match-regex regex))
+  (let ((regex (compile-regex "(?[\\x{41}])")))
+    (expect "A" :to-match-regex regex)
+    (expect-not "B" :to-match-regex regex))
+  (dolist (pattern '("(?[(a])" "(?[[a]"))
+    (signals regex-syntax-error (cl-regex-kit::parse-regex pattern))))
+
 (it "flushes accumulated literal ranges before a later class-item kind"
   (let ((regex (compile-regex "[a[:digit:]]")))
     (expect "a" :to-match-regex regex)
@@ -160,9 +174,53 @@
     (expect-not "A" :to-match-regex regex)))
 
 (it "treats non-boundary escapes as literals inside a character class"
-  (dolist (pattern '("[\\B]" "[\\C]" "[\\Q]"))
-    (let ((regex (compile-regex pattern)))
-      (expect (subseq pattern 2 3) :to-match-regex regex))))
+  (dolist (row '(("[\\A]" "A") ("[\\B]" "B") ("[\\C]" "C")
+                 ("[\\G]" "G") ("[\\K]" "K") ("[\\Q]" "Q")
+                 ("[\\Z]" "Z") ("[\\z]" "z") ("[\\<]" "<")
+                 ("[\\>]" ">")))
+    (destructuring-bind (pattern character) row
+      (expect character :to-match-regex (compile-regex pattern))))
+  (dolist (pattern '("[\\R]" "[\\X]" "[\\g<1>]" "[\\k<name>]" "[\\8]"))
+    (signals regex-syntax-error (cl-regex-kit::parse-regex pattern)))
+  (signals regex-syntax-error
+    (cl-regex-kit::parse-regex "[\\0]" :octal nil)))
+
+(it "covers byte shorthand classes and parser option contracts"
+  (dolist (row '(("[\\d]" 53) ("[\\D]" 65) ("[\\w]" 65)
+                 ("[\\W]" 45) ("[\\s]" 32) ("[\\S]" 65)
+                 ("[\\h]" 9) ("[\\H]" 65)))
+    (destructuring-bind (pattern code) row
+      (let ((input (make-array 1 :element-type '(unsigned-byte 8)
+                               :initial-contents (list code))))
+        (expect input :to-match-regex (compile-byte-regex pattern)))))
+  (expect (cl-regex-kit::parse-regex "a.b" :literal t) :to-be-truthy)
+  (expect (cl-regex-kit::parse-regex "(a)" :never-capture t) :to-be-truthy)
+  (expect (cl-regex-kit::parse-regex "\\N" :line-terminator #\Return)
+          :to-be-truthy)
+  (expect (cl-regex-kit::parse-regex "a" :nest-limit 2) :to-be-truthy)
+  (expect (cl-regex-kit::union-matcher nil) :to-equal '(:ranges nil))
+  (dolist (arguments '((:initial-flags nil) (:byte-mode 1) (:literal 1)
+                       (:never-capture 1) (:octal 1) (:nest-limit -1)
+                       (:line-terminator "x")))
+    (signals type-error (apply #'cl-regex-kit::parse-regex "a" arguments))))
+
+(it "rejects incomplete comments and malformed scanner targets"
+  (dolist (pattern '("(?#unclosed" "a??+"))
+    (signals regex-syntax-error (cl-regex-kit::parse-regex pattern)))
+  (dolist (case '(("\\N{" 3)
+                  ("\\N{}" 3)))
+    (destructuring-bind (pattern position) case
+      (signals regex-syntax-error
+        (cl-regex-kit::scan-named-character pattern position))))
+  (dolist (case '(("\\g" #\g) ("\\g<1" #\g) ("\\g<>" #\g)
+                  ("\\g{1a}" #\g) ("\\g{a-}" #\g)
+                  ("\\k{+1}" #\k) ("\\g{+0}" #\g)
+                  ("\\g<1a>" #\g) ("\\g<name->" #\g)))
+    (destructuring-bind (pattern kind) case
+      (signals regex-syntax-error
+        (cl-regex-kit::scan-backreference pattern 2 kind))))
+  (dolist (pattern '("(?[" "(?[(\\d])" "(?[[a]]"))
+    (signals regex-syntax-error (cl-regex-kit::parse-regex pattern))))
 
 (it "matches a lowercase byte against an uppercase-only case-insensitive class"
   (let ((regex (compile-byte-regex "(?i-u:[A-Z])")))
@@ -227,7 +285,9 @@
                      (#\U ,cl-regex-kit::+flag-ungreedy+)
                      (#\x ,cl-regex-kit::+flag-extended+)
                      (#\u ,cl-regex-kit::+flag-unicode+)
-                     (#\R ,cl-regex-kit::+flag-crlf+)))
+                     (#\R ,cl-regex-kit::+flag-crlf+)
+                     (#\n ,cl-regex-kit::+flag-no-auto-capture+)
+                     (#\J ,cl-regex-kit::+flag-duplicate-names+)))
       (destructuring-bind (character flag) entry
         (setf flags (cl-regex-kit::update-parser-flag flags character t))
         (expect (logtest flag flags) :to-be-truthy)
@@ -327,7 +387,24 @@
 (it "rejects an unclosed named-capture body and an unnamed group's missing < after ?P"
   (dolist (pattern '("(?P<name" "(?<name"))
     (signals regex-syntax-error (cl-regex-kit::parse-regex pattern))))
-(it "rejects constructs outside the current regex dialect" (dolist (pattern (quote ("(?Cx)" "(?C1x)" "(?C\"tag)" "(?{1})" "(??{1})" "a{~1}" "(*UNKNOWN)"))) (signals regex-syntax-error (cl-regex-kit::parse-regex pattern))))
+(it "reports unclosed numeric subroutine references as syntax errors"
+  (dolist (pattern '("(?1" "(?-1"))
+    (signals regex-syntax-error (cl-regex-kit::parse-regex pattern))))
+(it "rejects malformed advanced-group forms"
+  (dolist (pattern
+           '("(*PLA)"
+             "(*PLA:a"
+             "(*SKIP:)"
+             "(?>a"
+             "(?+1)"
+             "(?-1)"
+             "(?()"
+             "(?(1)a"
+             "(?(R1a)"
+             "(?(R?)a)"
+             "(?(<name>a)"))
+    (signals regex-syntax-error (cl-regex-kit::parse-regex pattern))))
+(it "rejects constructs outside the current regex dialect" (dolist (pattern (quote ("(?Cx)" "(?C1x)" "(?C\"tag)" "(?{1})" "(??{1})" "a{~1}" "(*UNKNOWN)" "(?&1)" "(?&name" "(?&name]" "(*FAIL:tag)" "(*MARK:)" "(*MARK:(?))" "(*COMMIT" "(?=a" "(?*a" "(?<*a" "(?|(a)"))) (signals regex-syntax-error (cl-regex-kit::parse-regex pattern))))
 (it "parses PCRE2-style callouts"
   (let ((plain (cl-regex-kit::parse-regex "(?C)"))
         (numbered (cl-regex-kit::parse-regex "(?C42)"))
@@ -344,5 +421,91 @@
                    "(?C$mark$)"
                    "(?C{mark})"))
       (expect (cl-regex-kit::callout-node-tag
-               (cl-regex-kit::parse-regex pattern))
+              (cl-regex-kit::parse-regex pattern))
               :to-equal "mark"))))
+
+(it "returns stable values for tokenizer escape forms"
+  (multiple-value-bind (character raw-octet-p next-position)
+      (cl-regex-kit::scan-escaped-character "\\x41tail" 1)
+    (expect character :to-equal #\A)
+    (expect raw-octet-p :to-be-truthy)
+    (expect next-position :to-equal 4))
+  (multiple-value-bind (character raw-octet-p next-position)
+      (cl-regex-kit::scan-escaped-character "\\U0001F600" 1)
+    (expect character :to-equal (code-char #x1f600))
+    (expect raw-octet-p :to-be-null)
+    (expect next-position :to-equal 10))
+  (multiple-value-bind (character next-position)
+      (cl-regex-kit::scan-octal-code "141z" 1)
+    (expect character :to-equal #\a)
+    (expect next-position :to-equal 3))
+  (multiple-value-bind (digits next-position)
+      (cl-regex-kit::scan-while "x41" 0 #'cl-regex-kit::hex-digit-p)
+    (expect digits :to-equal "")
+    (expect next-position :to-equal 0)))
+
+(it "normalizes Unicode property and quoted-literal scanner forms"
+  (dolist (case (quote (("\\p{gc!=Lu}" "gc=Lu" t)
+                         ("\\p{Script:Greek}" "Script=Greek" nil)
+                         ("\\pL" "L" nil))))
+    (destructuring-bind (pattern expected-name expected-negated-p) case
+      (multiple-value-bind (descriptor negated-p next-position)
+          (cl-regex-kit::scan-unicode-property-name pattern 2)
+        (let ((expected-descriptor
+                (cl-regex-kit::resolve-unicode-property expected-name)))
+          (expect
+           (and (eq (cl-regex-kit::unicode-property-descriptor-kind descriptor)
+                    (cl-regex-kit::unicode-property-descriptor-kind
+                     expected-descriptor))
+                (equalp (cl-regex-kit::unicode-property-descriptor-payload descriptor)
+                        (cl-regex-kit::unicode-property-descriptor-payload
+                         expected-descriptor)))
+           :to-be-truthy))
+        (expect negated-p :to-equal expected-negated-p)
+        (expect next-position :to-equal (length pattern)))))
+  (multiple-value-bind (text next-position)
+      (cl-regex-kit::scan-quoted-literal "\\Qa.b\\Eb" 2)
+    (expect text :to-equal "a.b")
+    (expect next-position :to-equal 7))
+  (multiple-value-bind (text next-position)
+      (cl-regex-kit::scan-quoted-literal "\\Qunterminated" 2)
+    (expect text :to-equal "unterminated")
+    (expect next-position :to-equal (length "\\Qunterminated"))))
+
+(it "decodes named characters and backreference targets"
+  (multiple-value-bind (character next-position)
+      (cl-regex-kit::scan-named-character "\\N{LINE FEED}x" 3)
+    (expect character :to-equal #\Newline)
+    (expect next-position :to-equal 13))
+  (multiple-value-bind (capture-index name next-position relative-index subroutine-p)
+      (cl-regex-kit::scan-backreference "\\g<12>" 2 #\g)
+    (expect capture-index :to-equal 12)
+    (expect name :to-be-null)
+    (expect next-position :to-equal 6)
+    (expect relative-index :to-be-null)
+    (expect subroutine-p :to-be-null))
+  (multiple-value-bind (capture-index name next-position relative-index subroutine-p)
+      (cl-regex-kit::scan-backreference "\\g{+2}" 2 #\g)
+    (expect capture-index :to-be-null)
+    (expect name :to-be-null)
+    (expect next-position :to-equal 6)
+    (expect relative-index :to-equal 2)
+    (expect subroutine-p :to-be-null))
+  (multiple-value-bind (capture-index name next-position relative-index subroutine-p)
+      (cl-regex-kit::scan-backreference "\\k{name}" 2 #\k)
+    (expect capture-index :to-be-null)
+    (expect name :to-equal "name")
+    (expect next-position :to-equal 8)
+    (expect relative-index :to-be-null)
+    (expect subroutine-p :to-be-null))
+  (multiple-value-bind (capture-index name next-position relative-index subroutine-p)
+      (cl-regex-kit::scan-backreference "\\g'1'" 2 #\g)
+    (expect capture-index :to-equal 1)
+    (expect name :to-be-null)
+    (expect next-position :to-equal 5)
+    (expect relative-index :to-be-null)
+    (expect subroutine-p :to-be-truthy))
+  (signals regex-syntax-error
+    (cl-regex-kit::scan-backreference "\\k<1>" 2 #\k))
+  (signals regex-syntax-error
+    (cl-regex-kit::scan-backreference "\\g{0}" 2 #\g)))

@@ -1,7 +1,5 @@
 (in-package #:cl-regex-kit)
 
-(export '(run-advanced-regex advanced-regex-limit-error))
-
 (defvar *advanced-context* nil)
 
 (defstruct (advanced-state
@@ -540,7 +538,10 @@
        :start position
        :end end
        :class (%advanced-grapheme-class character)
-       :indic-conjunct-break (%advanced-indic-conjunct-break-class character)
+       :indic-conjunct-break
+       (%advanced-indic-conjunct-break-class
+        character
+        (%advanced-grapheme-class character))
        :extended-pictographic-p
        (%advanced-extended-pictographic-p character)))))
 (defun %advanced-grapheme-boundary-p (context position unicode-p)
@@ -1159,19 +1160,6 @@
         (advanced-state-recursion-target state)
         (advanced-state-committed-p state))))))
 
-(defun %advanced-condition-capture-index (condition context)
-  (case (first condition)
-    (:capture-index (second condition))
-    (:name
-     (or
-      (%advanced-capture-index-by-name (second condition) context)
-      (let ((group
-             (%advanced-find-group
-              (advanced-context-root context)
-              :name
-              (second condition))))
-        (%advanced-capture-index-for-group group))))))
-
 (defun %advanced-condition-true-p (condition state context depth)
   (cond
     ((eq condition :define)
@@ -1398,125 +1386,3 @@
                                  :initial-value
                                  nil)
     (first states)))
-
-(defun %advanced-input-p (text)
-  (or
-   (stringp text)
-   (and
-    (vectorp text)
-    (every
-     (lambda (element)
-       (and (integerp element) (<= 0 element 255)))
-     text))))
-
-(defun run-advanced-regex (regex
-                           text
-                           &key
-                           (start 0)
-                           end
-                           shortest-p
-                           longest-p
-                           never-newline-p)
-  "Run compiled REGEX with ordered backtracking and return a MATCH-RESULT.
-
-REGEX supplies the AST, capture metadata, resource limits, and byte mode.
-AST is evaluated leftmost-first. TEXT may be a string or an octet vector;
-byte offsets are preserved for octet input. The configured step and nest
-limits are hard limits and signal ADVANCED-REGEX-LIMIT-ERROR when exceeded.
-The result uses the same group-zero and (START . END) capture locations as
-RUN-PIKE-VM."
-  (check-type regex regex)
-  (let* ((ast (regex-ast regex))
-         (group-count (regex-group-count regex))
-         (group-names (regex-group-names regex))
-         (step-limit (regex-advanced-step-limit regex))
-         (nest-limit (regex-advanced-nest-limit regex))
-         (byte-mode-p (byte-regex-p regex)))
-    (check-type ast regex-node)
-    (check-type never-newline-p boolean)
-    (check-type byte-mode-p boolean)
-    (when (and shortest-p longest-p)
-      (error "SHORTEST-P and LONGEST-P cannot both be true"))
-    (validate-text-range regex text start end)
-    (unless (and (integerp step-limit) (> step-limit 0))
-      (error "STEP-LIMIT must be a positive integer"))
-    (unless (and (integerp nest-limit) (>= nest-limit 0))
-      (error "NEST-LIMIT must be a non-negative integer"))
-    (let* ((text-length (length text))
-           (limit (if (null end) text-length end))
-           (highest-capture (max 0 (ast-group-count ast) group-count))
-           (context
-            (make-advanced-context
-             :text text
-             :search-start start
-             :limit limit
-             :text-length text-length
-             :byte-mode-p byte-mode-p
-             :never-newline-p never-newline-p
-             :root ast
-             :group-count highest-capture
-             :group-names group-names
-             :step-limit step-limit
-             :steps 0
-             :state-limit step-limit
-             :state-count 0
-             :nest-limit nest-limit
-             :callout (regex-callout regex))))
-      (unless (and
-               (integerp start)
-               (integerp limit)
-               (<= 0 start limit text-length))
-        (error "START and END must define a range within TEXT"))
-      (loop with candidate = start
-            while (<= candidate limit)
-            do (let* ((slots
-                       (%advanced-initialize-capture-stacks
-                         (make-array
-                          (1+ (* 2 (1+ highest-capture)))
-                          :initial-element
-                          nil)
-                         highest-capture))
-                      (seed
-                       (%make-advanced-state
-                        candidate
-                        slots
-                        nil
-                        nil
-                        nil
-                        candidate
-                        0
-                        nil))
-                      (states (%advanced-node-evaluate ast seed context 0))
-                      (matches nil)
-                      (skip-to nil)
-                      (stop-candidate-p nil))
-                 (dolist (state states)
-                   (case (advanced-state-control state)
-  ((nil :accept) (push state matches))
-  (:skip
-   (unless skip-to
-     (setf skip-to (advanced-state-skip-to state))))
-  (:commit
-   (let ((committed
-          (let ((*advanced-context* context))
-            (%advanced-state-copy state))))
-     (setf (advanced-state-control committed) nil
-           (advanced-state-committed-p committed) t)
-     (push committed matches)))
-  (:commit-failure (return-from run-advanced-regex nil))
-  ((:prune :then) (setf stop-candidate-p t))))
-                 (when matches
-                   (return-from
-                    run-advanced-regex
-                    (%advanced-result-from-state
-                     (%advanced-select-result
-                      (nreverse matches)
-                      shortest-p
-                      longest-p)
-                     candidate
-                     highest-capture
-                     group-names)))
-                 (setf candidate (if stop-candidate-p (1+ candidate)
-                                     (max
-                                      (1+ candidate)
-                                      (or skip-to (1+ candidate))))))))))

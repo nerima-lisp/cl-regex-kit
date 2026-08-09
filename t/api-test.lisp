@@ -690,3 +690,155 @@
                        (match-end invalid-byte-result)))
             :to-equal
             '(1 2))))
+(it "reads character and octet elements on the advanced path"
+  (let* ((byte-lookahead
+           (compile-byte-regex "(?-u:(?=a)a)"))
+         (byte-invalid
+           (compile-byte-regex "(?-u:(?=\\xFF)\\xFF)"))
+         (unicode-backreference
+           (compile-regex
+            (format nil "(?i:(?<x>~C)\\k<x>)" (code-char #xE9))))
+         (byte-backreference
+           (compile-byte-regex "(?i-u:(?<x>a)\\k<x>)"))
+         (octet-a
+           (make-array 1
+                       :element-type '(unsigned-byte 8)
+                       :initial-contents '(97)))
+         (octet-invalid
+           (make-array 1
+                       :element-type '(unsigned-byte 8)
+                       :initial-contents '(255)))
+         (octet-case
+           (make-array 2
+                       :element-type '(unsigned-byte 8)
+                       :initial-contents '(65 97)))
+         (unicode-case
+           (format nil "~C~C" (code-char #xC9) (code-char #xE9)))
+         (byte-lookahead-result (scan byte-lookahead octet-a))
+         (byte-invalid-result (scan byte-invalid octet-invalid))
+         (unicode-backreference-result
+           (scan unicode-backreference unicode-case))
+         (byte-backreference-result
+           (scan byte-backreference octet-case)))
+    (dolist (regex
+             (list byte-lookahead byte-invalid unicode-backreference
+                   byte-backreference))
+      (expect (regex-advanced-p regex) :to-be-truthy))
+    (expect (and byte-lookahead-result
+                 (list (match-start byte-lookahead-result)
+                       (match-end byte-lookahead-result)))
+            :to-equal
+            '(0 1))
+    (expect (and byte-invalid-result
+                 (list (match-start byte-invalid-result)
+                       (match-end byte-invalid-result)))
+            :to-equal
+            '(0 1))
+    (expect (and unicode-backreference-result
+                 (list (match-start unicode-backreference-result)
+                       (match-end unicode-backreference-result)))
+            :to-equal
+            '(0 2))
+    (expect (and byte-backreference-result
+                 (list (match-start byte-backreference-result)
+                       (match-end byte-backreference-result)))
+            :to-equal
+            '(0 2))))
+(it "honors advanced end anchors, integer skips, and callout contracts"
+  (let* ((end-anchor (compile-regex "\\Z"))
+         (byte-end-anchor (compile-byte-regex "\\Z"))
+         (integer-skip (compile-regex "a(*SKIP:2)|b"))
+         (callout-without-callback (compile-regex "(?C7)a"))
+         (callout-with-invalid-callback
+           (compile-regex
+            "(?C7)a"
+            :callout
+            (lambda (number tag position text)
+              (declare (ignore number tag position text))
+              :invalid)))
+         (empty-result (scan end-anchor ""))
+         (line-result (scan end-anchor (format nil "a~C" (code-char 10))))
+         (crlf-result
+           (scan end-anchor (format nil "a~C~C" (code-char 13) (code-char 10))))
+         (byte-line-result
+           (scan byte-end-anchor
+                 (make-array 2
+                             :element-type '(unsigned-byte 8)
+                             :initial-contents '(97 10))))
+         (skip-result (scan integer-skip "ab")))
+    (dolist (regex
+             (list end-anchor byte-end-anchor integer-skip
+                   callout-without-callback callout-with-invalid-callback))
+      (expect (regex-advanced-p regex) :to-be-truthy))
+    (expect (and empty-result
+                 (list (match-start empty-result)
+                       (match-end empty-result)))
+            :to-equal
+            '(0 0))
+    (dolist (result (list line-result crlf-result byte-line-result))
+      (expect (and result
+                   (list (match-start result)
+                         (match-end result)))
+              :to-equal
+              '(1 1)))
+    (expect (and skip-result
+                 (list (match-start skip-result)
+                       (match-end skip-result)))
+            :to-equal
+            '(1 2))
+    (expect (scan callout-without-callback "a") :to-be-truthy)
+    (signals error
+      (scan callout-with-invalid-callback "a"))
+    (signals error
+      (compile-regex "(?=a)a" :nest-limit 0))))
+
+(it "validates public ranges and compile metadata"
+  (let* ((regex (compile-regex "(?<word>a)"))
+         (byte-regex (compile-byte-regex "a"))
+         (source (regex-source regex)))
+    (expect (cl-regex-kit::regex-ast regex) :to-be-truthy)
+    (expect (cl-regex-kit::regex-program regex) :to-be-truthy)
+    (expect (regex-group-count regex) :to-equal 1)
+    (expect (regex-capture-count regex) :to-equal 2)
+    (expect (regex-group-index regex "word") :to-equal 1)
+    (setf (char source 0) #\x)
+    (expect (regex-source regex) :to-equal "(?<word>a)")
+    (signals type-error
+      (scan regex #(97)))
+    (signals type-error
+      (scan byte-regex "a"))
+    (signals type-error
+      (scan regex "a" :start -1))
+    (signals type-error
+      (scan regex "a" :start 2))
+    (signals type-error
+      (scan regex "a" :end 2))
+    (signals type-error
+      (scan regex "a" :timeout 0))
+    (signals type-error
+      (scan regex "a" :timeout -1))
+    (signals error
+      (compile-regex "a" :callout 1))
+    (multiple-value-bind (line-terminator flags)
+        (cl-regex-kit::validate-regex-compile-options nil)
+      (expect line-terminator :to-be #\Newline)
+      (expect (integerp flags) :to-be-truthy))
+    (multiple-value-bind (line-terminator flags)
+        (cl-regex-kit::validate-regex-compile-options
+         t
+         :line-terminator 65)
+      (expect line-terminator :to-be #\A)
+      (expect (integerp flags) :to-be-truthy))
+    (signals type-error
+      (cl-regex-kit::validate-regex-compile-options
+       nil
+       :line-terminator #\é))
+    (expect (cl-regex-kit::matcher-contains-unicode-property-p
+             '(:property "L"))
+            :to-be-truthy)
+    (expect (cl-regex-kit::matcher-contains-unicode-property-p
+             '(:ranges ((1 . 2))))
+            :to-be nil)
+    (expect (cl-regex-kit::matcher-contains-unicode-property-p
+             '(:union (:ranges ((1 . 2))) (:property "L")))
+            :to-be-truthy)))

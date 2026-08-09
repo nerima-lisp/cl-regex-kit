@@ -303,10 +303,12 @@
             # branches guarding already-exhaustive `case`/`ecase` dispatches,
             # which deleting would trade a small coverage-number gain for
             # weaker protection against a future unhandled enum value. 100%
-            # is not reachable here without either regressing test-suite
-            # thoroughness's actual signal or removing that defensive code;
-            # these thresholds sit below the current 96.37%/94.01% baseline
-            # so the gate still catches a real regression.
+            # is not reachable here without either regressing the suite's
+            # signal or removing that defensive code. The semantic suite
+            # currently meets these acceptance thresholds; keep them as
+            # regression gates and close reachable gaps with meaningful
+            # fixtures. Do not delete defensive `otherwise`/catch-all `error`
+            # branches merely to make the percentages green.
             validationCommands = [
               ''
                 test -s coverage/cover-index.html

@@ -42,6 +42,9 @@ src/
   regex-grammar.lisp
                   PARSE-REGEX and the core grammar over that token vector:
                   alternation, concatenation, quantifiers, groups, inline flags
+  regex-grammar-groups.lisp
+                  capture groups, lookarounds, control verbs, callouts,
+                  subroutines, conditionals, and branch-reset groups
   regex-grammar-classes.lisp
                   character-class body grammar: `[...]`, POSIX classes, set
                   operators, over the same token vector
@@ -59,6 +62,9 @@ src/
   advanced-match.lisp
                   bounded AST execution for backreferences, assertions,
                   recursion, control verbs, and other non-regular constructs
+  advanced-runner.lisp
+                  validation, bounded search orchestration, and result
+                  selection for the advanced evaluator
   api-operations.lisp
                   non-overlapping iteration and split operations
   api-replace.lisp
@@ -88,10 +94,11 @@ operations and makes the ASDF serial order the dependency order.
 
 Compilation selects one of two execution paths.  A regular AST is lowered to
 an NFA and executed by the Pike VM; an AST containing capture-dependent or
-ordered-backtracking constructs is retained and executed by
-`advanced-match.lisp`.  The advanced path is deliberately bounded by step and
-nesting limits, and the shared match/operation APIs dispatch to it through the
-same compiled-regex value.
+ordered-backtracking constructs is retained and evaluated by
+`advanced-match.lisp`, then searched and selected by `advanced-runner.lisp`.
+The advanced path is deliberately bounded by step and nesting limits, and the
+shared match/operation APIs dispatch to it through the same compiled-regex
+value.
 
 ## Data flow
 
@@ -111,9 +118,10 @@ flag toggled by inline `(?u)`/`(?-u)`, byte-mode legality, extended-mode
 whitespace -- depends on *parser state reached along a particular parse
 path*, not lexical position, so the tokenizer defers it: every escape token
 carries a fully-decoded but unvalidated shape, and `regex-grammar.lisp`/
-`regex-grammar-classes.lisp` apply flag-dependent legality checks and build
-the `regex-node` tree while those flags are actually in scope. Both grammar
-files are hand-written recursive descent over the token vector rather than
+`regex-grammar-groups.lisp`/`regex-grammar-classes.lisp` apply flag-dependent
+legality checks and build the `regex-node` tree while those flags are actually
+in scope. The grammar files are hand-written recursive descent over the token
+vector rather than
 `cl-parser-kit` combinator pipelines, because this grammar has no genuine
 backtracking ambiguity -- every branch point resolves on one token of
 lookahead -- which is also why `cl-parser-kit`'s tokenizer-rule and
@@ -225,6 +233,11 @@ validator. In each case the macro is pure compile-time code generation over
 data the call site supplies -- nothing here hides runtime control flow
 behind a macro.
 
+The test system follows the same data-first rule: `it-match-cases` in
+`t/matchers.lisp` compiles one pattern once and registers declarative positive
+and negative examples through cl-weave's native `it`/`expect` macros. It is a
+test-definition macro, not a runtime adapter around cl-weave.
+
 The parser's shared state -- position in the token stream, accumulated
 flags, capture bookkeeping -- lives in the dynamically-bound special
 variables `parser-syntax.lisp` declares (`*regex-token-position*`,
@@ -233,7 +246,8 @@ variables `parser-syntax.lisp` declares (`*regex-token-position*`,
 directly. This is the same technique CL-PPCRE's own recursive-descent parser
 uses, carried over unchanged from before the tokenizer rewrite below, and it
 is what lets the grammar be ordinary top-level `defun`s split across
-`regex-grammar.lisp` (shared state and core grammar) and
+`regex-grammar.lisp` (shared state and core grammar),
+`regex-grammar-groups.lisp` (group-level constructs), and
 `regex-grammar-classes.lisp` (character classes) rather than one form, with
 the same per-call isolation (each `parse-regex` invocation gets its own
 dynamic extent, so concurrent calls from different threads never share a
@@ -247,8 +261,9 @@ time (`peek`/`take`, `parser.lisp`/`parser-escapes.lisp`/
 whitespace/comment skipping. It has since been rewritten onto
 `cl-parser-kit`'s token/span model: `regex-tokenizer.lisp` turns the pattern
 into a `(vector cl-parser-kit:token)` in one forward pass, and
-`regex-grammar.lisp`/`regex-grammar-classes.lisp` consume that vector instead
-of the raw string. The escape/hex/octal/Unicode-property/POSIX-class
+`regex-grammar.lisp`/`regex-grammar-groups.lisp`/`regex-grammar-classes.lisp`
+consume that vector instead of the raw string. The escape/hex/octal/
+Unicode-property/POSIX-class
 character-scanning that used to be interleaved with grammar decisions across
 all three old files now lives in one place, `regex-tokenizer-escapes.lisp`,
 decoding each escape into an unvalidated `(:kind ... payload...)` shape
