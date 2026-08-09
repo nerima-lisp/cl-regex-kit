@@ -99,8 +99,7 @@ data while the class-generation logic lives in one place."
    (negative-p :initform nil)
    (direction :initform :forward
               :documentation "The matching direction, :FORWARD or :BACKWARD.")
-   (fixed-length :initform nil
-                 :documentation "Known fixed width for a lookbehind, when available."))
+   (fixed-length :initform nil :documentation "Known fixed width for a lookbehind, when available.") (non-atomic-p :initform nil :documentation "True when a positive assertion may backtrack into its child."))
   "A zero-width assertion with optional CHILD.")
 
 (define-regex-node lookaround-node (assertion-node)
@@ -151,6 +150,7 @@ data while the class-generation logic lives in one place."
    (argument :initform nil
              :documentation "Optional control-verb argument."))
   "A backtracking control verb such as (*SKIP) or (*FAIL).")
+(define-regex-node callout-node (regex-node) ((number :initform 0) (tag :initform nil :documentation "Optional callout tag.")) "A PCRE2-style zero-width callout.")
 
 (defun utf8-octets-for-character (character)
   "Return the UTF-8 encoding of CHARACTER as a list of octets."
@@ -189,12 +189,7 @@ data while the class-generation logic lives in one place."
                    (child (normalize-child (assertion-node-child assertion))))
                (if (eq child old-child)
                    assertion
-                   (make-instance (class-name (class-of assertion))
-                                  :kind (assertion-node-kind assertion)
-                                  :child child
-                                  :negative-p (assertion-node-negative-p assertion)
-                                  :direction (assertion-node-direction assertion)
-                                  :fixed-length (assertion-node-fixed-length assertion)))))
+                   (make-instance (class-name (class-of assertion)) :kind (assertion-node-kind assertion) :child child :negative-p (assertion-node-negative-p assertion) :direction (assertion-node-direction assertion) :fixed-length (assertion-node-fixed-length assertion) :non-atomic-p (assertion-node-non-atomic-p assertion)))))
            (normalize-literal (literal)
              (if (and byte-mode-p (not (literal-node-raw-octet-p literal)) (> (char-code (literal-node-char literal)) 127))
                  (let ((octets (utf8-octets-for-character (literal-node-char literal))))
@@ -290,22 +285,119 @@ data while the class-generation logic lives in one place."
   (typecase node
     ((or backreference-node grapheme-node assertion-node atomic-node
          possessive-repetition-node conditional-node subroutine-node
-         control-verb-node reset-match-start-node)
+         control-verb-node callout-node reset-match-start-node)
      t)
     (anchor-node
      (member (anchor-node-kind node)
-             (quote (:match-start :end-before-final-newline))
-             :test (function eq)))
+             '(:match-start :match-end :end-before-final-newline
+               :grapheme-boundary :word-boundary-unicode
+               :sentence-boundary)
+             :test #'eq))
     (concat-node
-     (some (function ast-contains-advanced-p)
-           (concat-node-children node)))
+     (some #'ast-contains-advanced-p (concat-node-children node)))
     (alternation-node
-     (some (function ast-contains-advanced-p)
-           (alternation-node-branches node)))
+     (some #'ast-contains-advanced-p (alternation-node-branches node)))
     (repetition-node
      (ast-contains-advanced-p (repetition-node-child node)))
-    (group-node (or (group-node-balance-name node) (ast-contains-advanced-p (group-node-child node))))
+    (group-node
+     (or (group-node-balance-name node)
+         (ast-contains-advanced-p (group-node-child node))))
     (otherwise nil)))
+  (defun ast-fixed-length (node byte-mode-p)
+  "Return NODE's exact consumed width, or NIL when its width is unknown."
+  (typecase node
+    (literal-node
+     (if (and byte-mode-p
+              (literal-node-unicode-p node)
+              (> (char-code (literal-node-char node)) #x7f))
+         nil
+         1))
+    (char-class-node
+     (if (and byte-mode-p (char-class-node-unicode-p node))
+         nil
+         1))
+    (any-char-node
+     (if (or (any-char-node-crlf-p node)
+             (and byte-mode-p (any-char-node-unicode-p node)))
+         nil
+         1))
+    (line-break-node nil)
+    ((or anchor-node reset-match-start-node assertion-node) 0)
+    (concat-node
+     (loop with total = 0
+           for child in (concat-node-children node)
+           for width = (ast-fixed-length child byte-mode-p)
+           unless (integerp width)
+             do (return nil)
+           do (incf total width)
+           finally (return total)))
+    (alternation-node
+     (let ((widths (mapcar (lambda (branch)
+                             (ast-fixed-length branch byte-mode-p))
+                           (alternation-node-branches node))))
+       (when (and widths
+                  (every (function integerp) widths)
+                  (apply (function =) widths))
+         (first widths))))
+    (repetition-node
+     (let ((width (ast-fixed-length (repetition-node-child node) byte-mode-p))
+           (max (repetition-node-max node)))
+       (when (and (integerp width)
+                  (integerp max)
+                  (= (repetition-node-min node) max))
+         (* (repetition-node-min node) width))))
+    (possessive-repetition-node
+     (let ((width (ast-fixed-length
+                   (possessive-repetition-node-child node)
+                   byte-mode-p))
+           (max (possessive-repetition-node-max node)))
+       (when (and (integerp width)
+                  (integerp max)
+                  (= (possessive-repetition-node-min node) max))
+         (* (possessive-repetition-node-min node) width))))
+    (group-node (ast-fixed-length (group-node-child node) byte-mode-p))
+    (atomic-node (ast-fixed-length (atomic-node-child node) byte-mode-p))
+    (otherwise nil)))
+  (defun annotate-lookbehind-lengths (node byte-mode-p)
+  "Annotate lookbehind nodes after byte-mode AST normalization."
+  (let ((seen (make-hash-table :test (function eq))))
+    (labels ((visit (current)
+               (when (and current
+                          (not (gethash current seen)))
+                 (setf (gethash current seen) t)
+                 (typecase current
+                   (assertion-node
+                    (when (eq (assertion-node-direction current) :backward)
+                      (setf (slot-value current (quote fixed-length))
+                            (ast-fixed-length
+                             (assertion-node-child current)
+                             byte-mode-p)))
+                    (visit (assertion-node-child current)))
+                   (concat-node
+                    (mapc (function visit) (concat-node-children current)))
+                   (alternation-node
+                    (mapc (function visit) (alternation-node-branches current)))
+                   (repetition-node
+                    (visit (repetition-node-child current)))
+                   (possessive-repetition-node
+                    (visit (possessive-repetition-node-child current)))
+                   (group-node
+                    (visit (group-node-child current)))
+                   (atomic-node
+                    (visit (atomic-node-child current)))
+                   (conditional-node
+                    (let ((condition (conditional-node-condition current)))
+                      (when (typep condition (quote regex-node))
+                        (visit condition)))
+                    (visit (conditional-node-yes-branch current))
+                    (visit (conditional-node-no-branch current)))
+                   (subroutine-node
+                    (let ((target (subroutine-node-target current)))
+                      (when (typep target (quote regex-node))
+                        (visit target))))
+                   (otherwise nil)))))
+      (visit node)))
+  node)
 
   (defun ast-group-count (node)
     "Return the highest capture index present in NODE."

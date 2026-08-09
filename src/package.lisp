@@ -3,6 +3,11 @@
 ;;;; The single public package. Everything a caller needs -- compiling a
 ;;;; pattern, matching it, and reading a match's captures -- is exported here
 ;;;; and nothing else.
+;;;; src/package.lisp
+;;;;
+;;;; The single public package. Everything a caller needs -- compiling a
+;;;; pattern, matching it, and reading a match's captures -- is exported here
+;;;; and nothing else.
 (defpackage #:cl-regex-kit
   (:use #:cl)
   (:import-from #:cl-parser-kit
@@ -30,6 +35,7 @@
    #:regex-advanced-step-limit
    #:regex-advanced-nest-limit
    #:regex-never-newline-p
+   #:regex-callout
    ;; Multi-pattern compilation
    #:compile-regex-set
    #:compile-byte-regex-set
