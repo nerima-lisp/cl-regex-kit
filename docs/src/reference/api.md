@@ -27,6 +27,30 @@ no consuming expression, including explicit newline literals, character classes,
 dotall `.`, or byte `\\C`, may consume LF. `:octal` defaults to true for RE2 compatibility; set it to
 `nil` to reject `\\ooo` escapes as Rust's default builder does.
 
+### Advanced callouts and balancing groups
+
+Advanced patterns can invoke a callback at a PCRE2-style callout node. The
+callback can observe the callout number, optional tag, current position, and
+input text, then return `:continue` (or `NIL`) to keep the match path or
+`:fail` to reject it:
+
+```lisp
+(let ((events nil)
+      (regex (compile-regex
+              "(?C7)a"
+              :callout
+              (lambda (number tag position text)
+                (push (list number tag position text) events)
+                :continue))))
+  (scan regex "a")
+  (nreverse events))
+;; => ((7 NIL 0 "a"))
+```
+
+Balancing groups use .NET-compatible syntax. For example,
+`(?<open>a)+(?<-open>b)+` matches `aabb`; a balancing group with no capture
+to pop fails.
+
 ### `compile-byte-regex`
 
 ```lisp
