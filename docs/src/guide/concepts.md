@@ -70,7 +70,9 @@ to exponential time, because failed combinations get re-explored instead of
 merged away. The thread-set simulation above never repeats work, so matching
 time is `O(pattern-size * input-size)` regardless of the input.
 
-The trade is expressiveness: [backreferences and unbounded
-lookaround](../reference/compatibility.md) require matching against runtime-captured text
-or unbounded lookahead, which a finite automaton cannot represent without
-giving up the linear-time guarantee. `cl-regex-kit` chooses the guarantee.
+The trade is an execution boundary: [backreferences, lookaround, and other
+advanced constructs](../reference/compatibility.md) require runtime state
+that a finite automaton cannot represent without giving up the linear-time
+guarantee. `cl-regex-kit` keeps that guarantee for the regular path and routes
+these constructs to a separate bounded executor; advanced matches are subject
+to `:size-limit` and `:nest-limit` instead of the regular path's guarantee.

@@ -4,7 +4,7 @@
   "Validate a half-open input range and return its exclusive end."
   (unless (and (integerp start) (<= 0 start (length text)))
     (error 'type-error :datum start :expected-type `(integer 0 ,(length text))))
-  (let ((limit (or end (length text))))
+  (let ((limit (if (null end) (length text) end)))
     (unless (and (integerp limit) (<= start limit (length text)))
       (error 'type-error :datum end :expected-type `(or null (integer ,start ,(length text)))))
     limit))
@@ -105,17 +105,43 @@ RUN-PIKE-VM invoked, not how to get there."
   (let ((limit (validate-text-range regex text start end)))
     (call-with-timeout timeout (lambda () (funcall thunk limit)))))
 
+(defun %call-advanced-regex-runner
+    (regex text start end &key shortest-p longest-p)
+  "Invoke RUN-ADVANCED-REGEX, the optional advanced execution backend.
+
+The backend contract is:
+  (run-advanced-regex regex text &key start end shortest-p longest-p
+                      never-newline-p)
+It returns a MATCH-RESULT or NIL, just like RUN-PIKE-VM. REGEX carries
+the AST and advanced resource limits in REGEX-ADVANCED-STEP-LIMIT and
+REGEX-ADVANCED-NEST-LIMIT; the backend is responsible for consuming those
+limits. This lookup is intentionally dynamic because ASDF loads API-MATCH
+before any optional advanced backend. Ordinary regexes do not call this
+function."
+  (let ((runner (and (fboundp (quote run-advanced-regex))
+                     (symbol-function (quote run-advanced-regex)))))
+    (unless runner
+      (error "Advanced regex runner RUN-ADVANCED-REGEX is not loaded."))
+    (funcall runner regex text
+             :start start
+             :end end
+             :shortest-p shortest-p
+             :longest-p longest-p
+             :never-newline-p (regex-never-newline-p regex))))
+
 (defmacro with-pike-vm-match ((result regex text start end timeout &rest vm-keys) &body body)
-  "Bind RESULT to REGEX's MATCH-RESULT (or NIL) in TEXT's validated
+  "Bind RESULT to the MATCH-RESULT (or NIL) in TEXT within the validated
 [START, END) range, then evaluate BODY. RESULT is intentional anaphora: BODY
 names it to read the outcome, exactly like the LET it replaces.
 
-Expands to a CALL-WITH-VALIDATED-MATCH invocation whose continuation runs
+Expands to a CALL-WITH-VALIDATED-MATCH invocation whose continuation dispatches
+advanced regexes to %CALL-ADVANCED-REGEX-RUNNER, while ordinary regexes use
 RUN-PIKE-VM with the :start/:end/:never-newline-p arguments every SCAN-shaped
 entry point supplies, plus VM-KEYS for the one flag (:shortest-p or
 :longest-p) that distinguishes it from a plain leftmost-first SCAN. This is
-the one place that assembles a RUN-PIKE-VM call, so SCAN, SHORTEST-MATCH, and
-LONGEST-MATCH differ only in VM-KEYS and what BODY does with RESULT.
+the one place that assembles the ordinary RUN-PIKE-VM call, so SCAN,
+SHORTEST-MATCH, and LONGEST-MATCH differ only in VM-KEYS and what BODY does
+with RESULT.
 
 REGEX/TEXT/START/END/TIMEOUT are each evaluated exactly once, in the order
 written, regardless of how many times the expansion below references them."
@@ -133,11 +159,15 @@ written, regardless of how many times the expansion below references them."
               (call-with-validated-match
                ,regex-var ,text-var ,start-var ,end-var ,timeout-var
                (lambda (limit)
-                 (run-pike-vm (regex-program ,regex-var) ,text-var
-                              :start ,start-var
-                              :end limit
-                              :never-newline-p (regex-never-newline-p ,regex-var)
-                              ,@vm-keys)))))
+                 (if (regex-advanced-p ,regex-var)
+                     (%call-advanced-regex-runner
+                      ,regex-var ,text-var ,start-var limit
+                      ,@vm-keys)
+                     (run-pike-vm (regex-program ,regex-var) ,text-var
+                                  :start ,start-var
+                                  :end limit
+                                  :never-newline-p (regex-never-newline-p ,regex-var)
+                                  ,@vm-keys))))))
        ,@body)))
 
 (defun scan (regex text &key (start 0) end timeout)
@@ -271,6 +301,11 @@ NIL.  The returned vector never exposes the VM's capture slots."
   "The end offset of the whole match."
   (check-type match-result match-result)
   (match-result-end match-result))
+
+(defun match-mark (match-result)
+  "The last MARK control-verb tag reached by the match, or NIL."
+  (check-type match-result match-result)
+  (match-result-mark match-result))
 
 (defun resolve-group-index (match-result index)
   (check-type match-result match-result)

@@ -1,10 +1,11 @@
 # Compatibility
 
-`cl-regex-kit` is built on Thompson NFA construction and Pike's VM simulation,
-the same foundation as RE2 and Rust's `regex` crate. That foundation is what
-guarantees matching time linear in the input -- and it is also what rules out
-a few features every backtracking-based engine (Perl, PCRE, Python's `re`)
-supports.
+`cl-regex-kit` has two execution paths. Thompson NFA construction and
+Pike's VM simulation, the same foundation as RE2 and Rust's `regex` crate,
+handle the regular subset with a linear-time guarantee. Patterns that require
+capture-dependent or ordered-backtracking semantics are routed to a bounded
+advanced executor. The advanced path expands compatibility without pretending
+that every pattern still has the NFA path's worst-case bound.
 
 ## Implemented RE2/Rust-style syntax
 
@@ -31,7 +32,11 @@ supports.
   separators: `=`, `:`, and `!=`; `!=` composes with the outer `\\p` or `\\P`
   negation; `\\b`/`\\B` boundaries, Rust-style `\\b{start}`/`\\b{end}`/`\\b{start-half}`/`\\b{end-half}` boundary variants,
   and RE2-style `\\<`/`\\>` word boundaries
-- `\\a`, `\\f`, `\\n`, `\\r`, `\\t`, `\\v`, one- through three-digit `\\ooo`, `\\xHH`, `\\x{...}`, `\\uHHHH`,
+- Extended character escapes: `\\h`/`\\H` for Unicode horizontal whitespace,
+  `\\N` for a non-newline character, `\\R` for a line-break sequence (including
+  CRLF as one consuming unit), and named characters such as
+  `\\N{LATIN CAPITAL LETTER A}`
+- `\\a`, `\\f`, `\\n`, `\\r`, `\\t`, `\\v`, one- through three-digit `\\ooo`, braced octal `\\o{...}`, `\\xHH`, `\\x{...}`, `\\uHHHH`,
   `\\u{...}`, `\\UHHHHHHHH`, and `\\U{...}` escapes (including character classes), plus RE2-style
   `\\Q...\\E` quoted literals
 - `.` and inline `i`, `m`, `s`, `R`, `U`, `x`, and `u` flags, including scoped and disabling
@@ -55,13 +60,40 @@ supports.
   `split-inclusive`, and `split-n`, and
   first, bounded, and all replacement through `replace-first`, `replace-n`,
   and `replace-all`, with Rust-style capture templates (`$0`, `$name`,
-  `${name}`, and `$$`) by default, and cl-ppcre-style templates (`\1`, `\&`,
-  `\{name}`, and `\\`) through `:template-syntax :backslash`
+  `${name}`, and `$$`)
 - RE2/Rust-style multi-pattern matching through `compile-regex-set`,
   `regex-set-count`, `regex-set-empty-p`, `regex-set-matches`,
   `regex-set-matches-at`, `regex-set-matches-into`, `regex-set-match-p`, and
   `regex-set-match-at-p`; duplicate patterns retain their individual source
   indexes
+
+## Advanced ordered-backtracking syntax
+
+The advanced executor handles constructs that cannot be represented by the
+regular NFA alone:
+
+- Numeric and named backreferences, including `\g{n}`, `\k<name>`,
+  and quoted subroutine names with `\g'name'`
+- Positive and negative lookahead and lookbehind, including fixed- and
+  variable-length lookbehind
+- Extended grapheme clusters (`\X`), possessive quantifiers, and atomic
+  groups
+- Subroutine calls and recursion: `(?R)`, `(?&name)`,
+  `(?P>name)`, relative calls, and recursion conditions
+- DEFINE blocks, capture conditions, and branch-reset groups
+  (`(?|...)`)
+- Match-position and end-of-input controls: `\K`, `\G`, and
+  `\Z`
+- PCRE-style control verbs: `(*FAIL)`, `(*SKIP)`,
+  `(*PRUNE)`, `(*COMMIT)`, `(*THEN)`,
+  `(*ACCEPT)`, and `(*MARK:tag)`, including their short
+  aliases where defined by the parser
+
+The advanced executor honors `:size-limit` as a maximum evaluation-step
+budget and `:nest-limit` as the recursion-depth limit. A timeout can
+also be supplied through the existing matching APIs. These limits are
+resource safeguards, not a claim of linear-time matching for arbitrary
+backtracking patterns.
 
 ## Compilation options
 
@@ -103,71 +135,28 @@ On expiry it signals `regex-timeout`; the default `nil` imposes no deadline.
 This uses SBCL's timeout facility and shares the project's SBCL-only
 portability boundary.
 
-## Not supported, by design
+## Outside current dialect
 
-### Backreferences (`\1`, `\2`, ...)
-
-Matching `\1` requires comparing the input against text captured *at match
-time* -- a context-sensitive requirement that a finite automaton cannot
-express. Supporting it means falling back to backtracking for the whole
-pattern, which reintroduces the exponential worst case this engine exists to
-avoid.
-
-This restriction is about backreferences *in a pattern*. It says nothing
-about `\1` in a *replacement template*, which is an ordinary
-substitution and costs the engine nothing; see
-[replacement templates](#replacement-templates) below.
-
-Note that `\1` in a pattern is not rejected: with the default `:octal t`, it
-parses as the octal escape for U+0001. A caller that accepts patterns
-written for a backreference-supporting engine should pass `:octal nil`, which
-makes `\1` through `\7` signal `regex-syntax-error` instead of silently
-matching a control character. `\8` and `\9` always signal, since no octal
-reading exists for them.
-
-### Lookaround
-
-Lookahead and lookbehind are not part of the supported RE2/Rust-compatible
-syntax. Supporting them would require a distinct matching strategy and would
-complicate the engine's resource guarantees.
+The advanced path deliberately stops short of embedding another language or
+running user code. PCRE callouts, Perl code interpolation, balancing groups,
+fuzzy matching, and control verbs not listed above are outside the current
+dialect. They should be rejected as syntax rather than silently compiled with
+different meaning.
 
 ## Why this trade
 
-RE2's own documentation states this trade explicitly, and this project makes
-the same choice: a smaller, well-defined feature set in exchange for a
-worst-case time guarantee that holds for *any* input, including adversarial
-ones. An application that must accept untrusted patterns or untrusted input
-text benefits from this guarantee in a way that a backtracking engine,
-however featureful, cannot provide.
-
-If a project needs backreferences or lookaround, a backtracking
-engine such as [cl-ppcre](https://edicl.github.io/cl-ppcre/) is the
-appropriate tool -- and not a defect in either design, just a different point
-on the same trade-off.
+The regular NFA path preserves the RE2/Rust guarantee for applications that
+need predictable behavior on untrusted patterns or input. The advanced path is
+available when compatibility with capture-dependent and ordered-backtracking
+syntax is more important than that guarantee. Use `:size-limit`,
+`:nest-limit`, and `:timeout` when advanced patterns are
+supplied by untrusted sources.
 
 ## Replacement templates
 
-Replacement templates are independent of the matching engine, so this is one
-place where cl-ppcre compatibility *is* available. `replace-first`,
-`replace-n`, and `replace-all` take a `:template-syntax` argument:
-
-- `:dollar` (the default) is the Rust-style dialect: `$1`, `$name`,
-  `${name}`, `$$`.
-- `:backslash` is the cl-ppcre-style dialect: `\1`, `\&`, `\{name}`, `\\`.
-
-The default has not changed and will not change; `:backslash` is opt-in per
-call. This matters for a caller that exposes replacement templates to *its*
-own users -- a `.tmux.conf` `#{s/pattern/replacement/}` modifier, say -- where
-the users have written `\1` and expect it to mean the first capture. Under
-`:dollar` such a template is emitted verbatim with no error, which is why the
-dialect is a deliberate choice at the call site rather than a guess made from
-the template's contents.
-
-`:backslash` reproduces `cl-ppcre:regex-replace-all` for every template
-cl-ppcre accepts. It additionally accepts `\0`, out-of-range group numbers,
-and `\{name}`, all of which cl-ppcre rejects; it does not implement
-cl-ppcre's `` \` `` and `\'` prematch/postmatch aliases. The
-[API reference](api.md) tabulates each case.
+`replace-first`, `replace-n`, and `replace-all` use one Rust-style template
+syntax: `$0`, `$1`, `$name`, `${name}`, and `$$`. Backslashes are literal
+characters, so `\1` is not a capture reference.
 
 ## Current differences
 
@@ -212,7 +201,7 @@ alias `Age=v151` are supported. Age uses the same static Unicode 16 range data a
   inside non-Unicode scopes. This supports Rust's mixed Unicode/non-Unicode
   `bytes::Regex` matching model. Direct non-ASCII literals and Unicode escapes
   (`\\x{...}`, `\\u...`, `\\U...`) in a non-Unicode scope encode to UTF-8, while
-  `\\xHH` and octal escapes retain exact-octet semantics; non-ASCII
+  `\\xHH`, octal, and braced-octal escapes retain exact-octet semantics; non-ASCII
   character-class literals and Unicode escapes that resolve to non-ASCII
   scalars are rejected there.
   `replace-first`, `replace-n`, and `replace-all` accept

@@ -6,6 +6,13 @@
 
 (defclass regex ()
   ((program :initarg :program :reader regex-program)
+   (ast :initarg :ast :reader regex-ast)
+   (advanced-p :initarg :advanced-p :reader regex-advanced-p
+               :initform nil)
+   (advanced-step-limit :initarg :advanced-step-limit
+                        :reader regex-advanced-step-limit)
+   (advanced-nest-limit :initarg :advanced-nest-limit
+                        :reader regex-advanced-nest-limit)
    (group-count :initarg :group-count :reader regex-group-count)
    (static-capture-count :initarg :static-capture-count
                          :reader regex-static-capture-count)
@@ -14,7 +21,7 @@
    (never-newline-p :initarg :never-newline-p :reader regex-never-newline-p
                     :initform nil)
    (byte-mode-p :initarg :byte-mode-p :reader byte-regex-p :initform nil))
-   (:documentation "A pattern compiled to a Thompson-NFA program, ready to match."))
+  (:documentation "A compiled regular expression with a safe NFA or advanced AST execution path."))
 
 (defun regex-p (object)
   "Return true when OBJECT is a compiled REGEX."
@@ -86,6 +93,13 @@ OPTIONS are passed to COMPILE-BYTE-REGEX."
     (concat-node (mapcan #'collect-group-names (concat-node-children node)))
     (alternation-node (mapcan #'collect-group-names (alternation-node-branches node)))
     (repetition-node (collect-group-names (repetition-node-child node)))
+    (possessive-repetition-node
+     (collect-group-names (possessive-repetition-node-child node)))
+    (assertion-node (collect-group-names (assertion-node-child node)))
+    (atomic-node (collect-group-names (atomic-node-child node)))
+    (conditional-node
+     (append (collect-group-names (conditional-node-yes-branch node))
+             (collect-group-names (conditional-node-no-branch node))))
     (otherwise nil)))
 
 (defun matcher-contains-unicode-property-p (matcher)
@@ -122,8 +136,19 @@ OPTIONS are passed to COMPILE-BYTE-REGEX."
      (some #'ast-can-match-invalid-utf8-p (alternation-node-branches node)))
     (repetition-node
      (ast-can-match-invalid-utf8-p (repetition-node-child node)))
+    (possessive-repetition-node
+     (ast-can-match-invalid-utf8-p (possessive-repetition-node-child node)))
     (group-node
      (ast-can-match-invalid-utf8-p (group-node-child node)))
+    (assertion-node
+     (ast-can-match-invalid-utf8-p (assertion-node-child node)))
+    (atomic-node
+     (ast-can-match-invalid-utf8-p (atomic-node-child node)))
+    (conditional-node
+     (or (ast-can-match-invalid-utf8-p (conditional-node-yes-branch node))
+         (ast-can-match-invalid-utf8-p (conditional-node-no-branch node))))
+    (subroutine-node
+     (and (typep (subroutine-node-target node) 'regex-node) (ast-can-match-invalid-utf8-p (subroutine-node-target node))))
     (otherwise nil)))
 
 (defun validate-regex-compile-options
@@ -171,17 +196,31 @@ independently-computed call that could silently drift from it."
                                   'character))))
      flags)))
 
-(defun finish-compiled-regex (ast pattern byte-mode-p size-limit never-newline)
-  "Shared tail of COMPILE-REGEX/COMPILE-BYTE-REGEX: compile AST to an NFA
-program and wrap it as a REGEX instance."
-  (multiple-value-bind (program group-count)
-      (compile-to-nfa ast pattern :instruction-limit size-limit)
-    (multiple-value-bind (static-group-count static-p)
-        (ast-static-capture-count ast)
-      (make-instance 'regex :program program :group-count group-count
-                     :static-capture-count (and static-p (1+ static-group-count))
-                     :group-names (collect-group-names ast) :source (copy-seq pattern)
-                     :never-newline-p never-newline :byte-mode-p byte-mode-p))))
+(defun finish-compiled-regex (ast pattern byte-mode-p size-limit never-newline nest-limit)
+  "Shared tail of COMPILE-REGEX/COMPILE-BYTE-REGEX.
+
+Safe patterns are compiled to the existing Thompson-NFA program. Patterns
+using features that need ordered backtracking retain their AST and are
+executed by the bounded advanced matcher instead."
+  (let ((advanced-p (ast-contains-advanced-p ast)))
+    (multiple-value-bind (program group-count)
+        (if advanced-p
+            (values nil (ast-group-count ast))
+            (compile-to-nfa ast pattern :instruction-limit size-limit))
+      (multiple-value-bind (static-group-count static-p)
+          (ast-static-capture-count ast)
+        (make-instance 'regex
+                       :program program
+                       :ast ast
+                       :advanced-p advanced-p
+                       :advanced-step-limit size-limit
+                       :advanced-nest-limit nest-limit
+                       :group-count group-count
+                       :static-capture-count (and static-p (1+ static-group-count))
+                       :group-names (collect-group-names ast)
+                       :source (copy-seq pattern)
+                       :never-newline-p never-newline
+                       :byte-mode-p byte-mode-p)))))
 
 (defun %compile-pattern (pattern byte-mode-p case-insensitive multi-line dot-matches-new-line
                           swap-greed ignore-whitespace unicode crlf literal never-capture
@@ -205,12 +244,12 @@ match Lisp strings, cannot represent an invalid one)."
                              :never-capture never-capture :octal octal
                              :line-terminator line-terminator)))
       (if byte-mode-p
-          (setf ast (normalize-byte-literals ast))
+          (setf ast (normalize-byte-literals ast byte-mode-p))
           (when (ast-can-match-invalid-utf8-p ast)
             (error 'regex-syntax-error
                    :pattern pattern
                    :reason "Character regexes cannot match invalid UTF-8 bytes")))
-      (finish-compiled-regex ast pattern byte-mode-p size-limit never-newline))))
+      (finish-compiled-regex ast pattern byte-mode-p size-limit never-newline nest-limit))))
 
 (defmacro define-pattern-compiler (name byte-mode-p domain-description)
   "Define NAME as a COMPILE-REGEX-shaped entry point compiling PATTERN for

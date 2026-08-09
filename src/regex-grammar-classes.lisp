@@ -47,25 +47,33 @@ in the negation CLASS-ITEM-FROM-ESCAPE applies around SHORTHAND-MATCHER's
 result.")
 
 (defun shorthand-ranges (character)
-  (mapcar (lambda (bound) (range (car bound) (cdr bound)))
-          (cdr (assoc (char-downcase character) +ascii-shorthand-character-ranges+
-                      :test #'char=))))
+  (if (char= (char-downcase character) #\h)
+      (list (range #\Tab #\Tab) (range #\Space #\Space))
+      (mapcar (lambda (bound) (range (car bound) (cdr bound)))
+              (cdr (assoc (char-downcase character) +ascii-shorthand-character-ranges+
+                          :test #'char=)))))
 
 (defun shorthand-matcher (character)
-  (if (flag-p +flag-unicode+) (case character
-      ((#\d #\D) (list :property (resolve-unicode-property "Nd")))
-      ((#\w #\W)
-        (list
-          :union
-          (list :property (resolve-unicode-property "Alphabetic"))
-          (list :property (resolve-unicode-property "Mark"))
-          (list :property (resolve-unicode-property "Nd"))
-          (list :property (resolve-unicode-property "Pc"))
-          (quote (:ranges ((95 . 95) (#x200c . #x200d))))))
-      ((#\s #\S) (list :property (resolve-unicode-property "White_Space")))
-      (otherwise nil))
-    (let ((ranges (shorthand-ranges character)))
-      (and ranges (list :ranges ranges)))))
+  (if (flag-p +flag-unicode+)
+      (case character
+        ((#\d #\D) (list :property (resolve-unicode-property "Nd")))
+        ((#\w #\W)
+         (list
+           :union
+           (list :property (resolve-unicode-property "Alphabetic"))
+           (list :property (resolve-unicode-property "Mark"))
+           (list :property (resolve-unicode-property "Nd"))
+           (list :property (resolve-unicode-property "Pc"))
+           (quote (:ranges ((95 . 95) (#x200c . #x200d))))))
+        ((#\s #\S) (list :property (resolve-unicode-property "White_Space")))
+        ((#\h #\H)
+         (list :ranges
+               (quote ((9 . 9) (32 . 32) (160 . 160) (5760 . 5760)
+                       (6158 . 6158) (8192 . 8202) (8239 . 8239)
+                       (8287 . 8287) (12288 . 12288)))))
+        (otherwise nil))
+      (let ((ranges (shorthand-ranges character)))
+        (and ranges (list :ranges ranges)))))
 
 (defun class-item-from-escape (token)
   (let ((escape (token-value token)))
@@ -73,29 +81,47 @@ result.")
       (:unicode-property
        (when (and *regex-byte-mode-p* (not (flag-p +flag-unicode+)))
          (fail "Unicode properties are not available in byte patterns" (token-start token)))
-       ;; See BUILD-ESCAPE-ATOM's :UNICODE-PROPERTY case in regex-grammar.lisp:
-       ;; the name's validity was already checked, unconditionally, at
-       ;; tokenize time.
        (let ((matcher (list :property (getf escape :descriptor))))
-         (values nil (if (eq (getf escape :from-p) (getf escape :negated-p)) matcher (list :negate matcher)) nil)))
+         (values nil
+                 (if (eq (getf escape :from-p) (getf escape :negated-p))
+                     matcher
+                     (list :negate matcher))
+                 nil)))
       (:shorthand
        (let ((which (getf escape :which)))
-         (values nil (if (member which '(#\D #\W #\S)) (list :negate (shorthand-matcher which))
-                          (shorthand-matcher which))
+         (values nil
+                 (if (member which (list #\D #\W #\S #\H))
+                     (list :negate (shorthand-matcher which))
+                     (shorthand-matcher which))
                  nil)))
-      ((:control :hex :octal :literal) (values (getf escape :char) nil
-                                                (and (eq (getf escape :kind) :hex) (getf escape :raw-octet-p)
-                                                     (not (flag-p +flag-unicode+))))))))
+      (:not-newline
+       (let ((terminators
+               (if (flag-p +flag-crlf+)
+                   (list (range #\Return #\Return)
+                         (range #\Newline #\Newline))
+                   (list (range *regex-line-terminator*
+                                *regex-line-terminator*)))))
+         (values nil
+                 (list :negate (ranges-matcher terminators))
+                 nil)))
+      ((:control :hex :octal :literal :named-character)
+       (values (getf escape :char) nil
+               (and (eq (getf escape :kind) :hex)
+                    (getf escape :raw-octet-p)
+                    (not (flag-p +flag-unicode+))))))))
 
 (defun class-item ()
   "Parse one character-class item: a literal, an escaped literal, or an
-escaped matcher (Unicode property or shorthand). Returns (values literal
-matcher raw-octet-p) -- MATCHER is non-NIL only for the escaped-matcher case,
-mirroring the original CLASS-ITEM's contract."
+escaped matcher. Returns (values literal matcher raw-octet-p), where MATCHER
+is non-NIL only for the escaped-matcher case."
   (let ((token (take-token)))
     (case (token-type token)
       (:escape (class-item-from-escape token))
       (:hex-brace-open (values (collect-braced-hex) nil nil))
+      (:octal-brace-open
+       (values (ensure-byte-character (collect-braced-hex 8 "octal"))
+               nil
+               (not (flag-p +flag-unicode+))))
       (otherwise (values (token-value token) nil nil)))))
 
 (defun class-set-operator ()

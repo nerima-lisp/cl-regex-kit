@@ -15,7 +15,7 @@
    #:compile-regex #:compile-byte-regex #:escape #:scan #:scan-at #:captures #:captures-at #:shortest-match #:shortest-match-at #:longest-match #:match #:byte-match #:is-match-p #:is-match-at #:all-matches #:do-matches #:do-captures
    #:full-match #:full-match-p
    #:split #:split-terminator #:split-inclusive #:split-n #:replace-first #:replace-all #:replace-n
-   #:match-result #:match-start #:match-end #:match-string
+   #:match-result #:match-start #:match-end #:match-mark #:match-string
    #:match-result-p
    #:match-captures
    #:match-group-start #:match-group-end #:match-group-string
@@ -25,6 +25,8 @@
    #:regex #:byte-regex
    #:regex-p #:byte-regex-p #:regex-group-count #:regex-capture-count #:regex-static-capture-count
    #:regex-capture-names #:regex-group-index #:regex-source
+   #:regex-advanced-p #:regex-advanced-step-limit #:regex-advanced-nest-limit
+   #:regex-never-newline-p
    #:compile-regex-set #:compile-byte-regex-set #:regex-set #:byte-regex-set
    #:regex-set-p #:byte-regex-set-p #:regex-set-patterns
    #:regex-set-count #:regex-set-empty-p
@@ -33,7 +35,9 @@
    #:cl-regex-kit-error
    #:regex-syntax-error #:regex-syntax-error-pattern #:regex-syntax-error-position
    #:regex-syntax-error-reason
-   #:regex-timeout #:regex-timeout-seconds)
+   #:regex-timeout #:regex-timeout-seconds
+   #:advanced-regex-limit-error #:advanced-regex-limit-kind
+   #:advanced-regex-limit #:advanced-regex-limit-used)
   (:export #:run-tests))
 
 (in-package #:cl-regex-kit/test)

@@ -300,3 +300,174 @@
     (expect (capture-locations-p locations) :to-be-truthy)
     (expect (capture-locations-p nil) :to-be nil)
     (expect (capture-locations-p result) :to-be nil)))
+(it
+  "executes advanced ordered-backtracking patterns through public scan"
+  (let* ((lookahead (compile-regex "(?=a)a"))
+         (lookbehind (compile-regex "(?<=a)b"))
+         (possessive (compile-regex "a++"))
+         (possessive-failure (compile-regex "a++a"))
+         (atomic (compile-regex "(?>a|ab)c"))
+         (quoted-subroutine (compile-regex "(?<word>a)\\g'word'"))
+         (lookahead-result (scan lookahead "a"))
+         (lookbehind-result (scan lookbehind "ab"))
+         (possessive-result (scan possessive "aa"))
+         (atomic-result (scan atomic "ac"))
+         (quoted-subroutine-result (scan quoted-subroutine "aa")))
+    (dolist (regex (list lookahead
+                         lookbehind
+                         possessive
+                         atomic
+                         quoted-subroutine))
+      (expect (regex-advanced-p regex) :to-be-truthy)
+      (expect (regex-advanced-step-limit regex) :to-be-truthy)
+      (expect (regex-advanced-nest-limit regex) :to-be-truthy)
+      (expect (regex-never-newline-p regex) :to-be nil))
+    (expect (and lookahead-result
+                 (list (match-start lookahead-result)
+                       (match-end lookahead-result)))
+            :to-equal
+            (list 0 1))
+    (expect (and lookbehind-result
+                 (list (match-start lookbehind-result)
+                       (match-end lookbehind-result)))
+            :to-equal
+            (list 1 2))
+    (expect (and possessive-result
+                 (list (match-start possessive-result)
+                       (match-end possessive-result)))
+            :to-equal
+            (list 0 2))
+    (expect (scan possessive-failure "aa") :to-be-null)
+    (expect (and atomic-result
+                 (list (match-start atomic-result)
+                       (match-end atomic-result)))
+            :to-equal
+            (list 0 2))
+    (expect (and quoted-subroutine-result
+                 (list (match-start quoted-subroutine-result)
+                       (match-end quoted-subroutine-result)))
+            :to-equal
+            (list 0 2))
+    (expect (scan atomic "abc") :to-be-null)))
+(it
+  "exposes MARK control-verb tags through the public match result"
+  (let* ((regex (compile-regex "a(*MARK:middle)b"))
+         (result (scan regex "ab")))
+    (expect (regex-advanced-p regex) :to-be-truthy)
+    (expect (match-string result "ab") :to-equal "ab")
+    (expect (match-mark result) :to-equal "middle")))
+(it
+  "applies advanced result selection and control verbs"
+  (let* ((selection (compile-regex "(?=a)(?:a|aa)"))
+         (fail (compile-regex "a(*FAIL)|b"))
+         (accept (compile-regex "a(*ACCEPT)b"))
+         (prune (compile-regex "a(*PRUNE)b|ac"))
+         (then (compile-regex "a(*THEN)b|ac"))
+         (longest (longest-match selection "aa")))
+    (dolist (regex (list selection fail accept prune then))
+      (expect (regex-advanced-p regex) :to-be-truthy))
+    (expect (shortest-match selection "aa") :to-equal 1)
+    (expect (and longest
+                 (list (match-start longest)
+                       (match-end longest)
+                       (match-string longest "aa")))
+            :to-equal
+            (list 0 2 "aa"))
+    (expect (match-string (scan fail "b") "b") :to-equal "b")
+    (expect (match-string (scan accept "ab") "ab") :to-equal "a")
+    (expect (scan prune "ac") :to-be-null)
+    (let ((result (scan then "ac")))
+      (expect result :to-be-truthy)
+      (expect (match-string result "ac") :to-equal "ac"))))
+(it
+  "covers advanced syntax families through public scan"
+  (let* ((cut (compile-regex "a\\Kb"))
+         (start (compile-regex "\\Gabc"))
+         (grapheme (compile-regex "\\X"))
+         (branch-reset (compile-regex "(?|(a)|(b))\\1"))
+         (conditional (compile-regex "(a)?(?(1)b|c)"))
+         (definition (compile-regex "(?(DEFINE)(?<word>[a-z]+))(?&word)"))
+         (recursive (compile-regex "(?<paren>\\((?:[^()]|(?&paren))*\\))"))
+         (cut-result (scan cut "ab"))
+         (start-result (scan start "zabc" :start 1))
+         (grapheme-text (format nil "a~C" (code-char #x301)))
+         (grapheme-result (scan grapheme grapheme-text))
+         (branch-result (scan branch-reset "bb"))
+         (conditional-result (scan conditional "c"))
+         (definition-result (scan definition "abc"))
+         (recursive-result (scan recursive "(a(b))")))
+    (dolist (regex (list cut start grapheme branch-reset conditional definition recursive))
+      (expect (regex-advanced-p regex) :to-be-truthy))
+    (expect (and cut-result
+                 (list (match-start cut-result)
+                       (match-end cut-result)
+                       (match-string cut-result "ab")))
+            :to-equal
+            (list 1 2 "b"))
+    (expect (and start-result
+                 (list (match-start start-result)
+                       (match-end start-result)
+                       (match-string start-result "zabc")))
+            :to-equal
+            (list 1 4 "abc"))
+    (expect (and grapheme-result
+                 (list (match-start grapheme-result)
+                       (match-end grapheme-result)
+                       (match-string grapheme-result grapheme-text)))
+            :to-equal
+            (list 0 2 grapheme-text))
+    (expect (match-string branch-result "bb") :to-equal "bb")
+    (expect (match-string conditional-result "c") :to-equal "c")
+    (expect (match-string definition-result "abc") :to-equal "abc")
+    (expect (match-string recursive-result "(a(b))") :to-equal "(a(b))")))
+(it
+  "covers PCRE named-reference spellings and bounded advanced anchors"
+  (let* ((g-brace (compile-regex "(?<x>A)\\g{x}"))
+         (k-brace (compile-regex "(?<x>A)\\k{x}"))
+         (short-mark (compile-regex "a(*:middle)b"))
+         (bounded-dollar (compile-regex "a(*:middle)$"))
+         (bounded-end (compile-regex "a(*:middle)\\z"))
+         (bounded-text (format nil "a~C" #\Newline))
+         (g-result (scan g-brace "AA"))
+         (k-result (scan k-brace "AA"))
+         (mark-result (scan short-mark "ab"))
+         (dollar-result (scan bounded-dollar bounded-text :end 1))
+         (end-result (scan bounded-end bounded-text :end 1)))
+    (dolist (regex (list g-brace k-brace short-mark bounded-dollar bounded-end))
+      (expect (regex-advanced-p regex) :to-be-truthy))
+    (expect (and g-result (match-string g-result "AA")) :to-equal "AA")
+    (expect (and k-result (match-string k-result "AA")) :to-equal "AA")
+    (expect (match-mark mark-result) :to-equal "middle")
+    (expect (and dollar-result
+                 (list (match-start dollar-result)
+                       (match-end dollar-result)))
+            :to-equal
+            (list 0 1))
+    (expect (and end-result
+                 (list (match-start end-result)
+                       (match-end end-result)))
+            :to-equal
+            (list 0 1))))
+(it
+  "accepts Unicode capture names in advanced references"
+  (let* ((name (string (code-char #x00e9)))
+         (g-pattern (format nil "(?<~A>a)\\g{~A}" name name))
+         (k-pattern (format nil "(?<~A>a)\\k<~A>" name name))
+         (subroutine-pattern (format nil "(?<~A>a)(?&~A)" name name))
+         (conditional-pattern (format nil "(?<~A>a)(?(~A)b|c)" name name))
+         (g-brace (compile-regex g-pattern))
+         (k-angle (compile-regex k-pattern))
+         (subroutine (compile-regex subroutine-pattern))
+         (conditional (compile-regex conditional-pattern))
+         (g-result (scan g-brace "aa"))
+         (k-result (scan k-angle "aa"))
+         (subroutine-result (scan subroutine "aa"))
+         (conditional-result (scan conditional "ab")))
+    (dolist (regex (list g-brace k-angle subroutine conditional))
+      (expect (regex-advanced-p regex) :to-be-truthy))
+    (dolist (result (list g-result k-result subroutine-result conditional-result))
+      (expect (and result
+                   (list (match-start result)
+                         (match-end result)))
+              :to-equal
+              (list 0 2)))))

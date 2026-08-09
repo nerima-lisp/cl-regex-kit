@@ -156,3 +156,104 @@ unterminated \\Q runs to the end of PATTERN, matching RE2/Rust semantics."
       (subseq pattern position end)
       (if (< end length) (+ end 2)
         end))))
+(defun scan-named-character (pattern position)
+  "POSITION is just past \\N{. Return (values character next-position)."
+  (let ((end (position #\} pattern :start position)))
+    (unless end
+      (tokenizer-fail pattern position "Unclosed named character"))
+    (when (= end position)
+      (tokenizer-fail pattern position "Unicode character name cannot be empty"))
+    (let* ((name (string-upcase
+                   (substitute #\_ #\Space (subseq pattern position end))))
+           (character
+             (or
+               (name-char name)
+               (cdr
+                 (assoc
+                   name
+                   (list
+                     (cons "LINE_FEED" #\Newline)
+                     (cons "CARRIAGE_RETURN" #\Return)
+                     (cons "CHARACTER_TABULATION" #\Tab)
+                     (cons "TAB" #\Tab)
+                     (cons "FORM_FEED" #\Page)
+                     (cons "BACKSPACE" (code-char 8))
+                     (cons "NULL" (code-char 0))
+                     (cons "ESCAPE" (code-char 27))
+                     (cons "DELETE" (code-char 127))
+                     (cons "NEXT_LINE" (code-char #x85)))
+                   :test #'string=)))))
+      (unless (characterp character)
+        (tokenizer-fail pattern position "Unknown Unicode character name"))
+      (values character (1+ end)))))
+(defun scan-backreference (pattern position kind)
+  "POSITION is just past \\g or \\k. Return (values capture-index name next-position relative-index subroutine-p)."
+  (let* ((pattern-length (length pattern))
+         (opening (and (< position pattern-length)
+                       (char pattern position)))
+         (closing (case opening
+                    (#\< #\>)
+                    (#\{ #\})
+                    (#\' #\')
+                    (otherwise nil)))
+         (brace-p (and opening (char= opening #\{)))
+         (quote-p (and opening (char= opening #\'))))
+    (unless closing
+      (tokenizer-fail pattern position
+                      "Backreference must use <...>, {...}, or '...'"))
+    (let* ((body-start (1+ position))
+           (end (position closing pattern :start body-start)))
+      (unless end
+        (tokenizer-fail pattern body-start "Unclosed backreference or subroutine"))
+      (when (= end body-start)
+        (tokenizer-fail pattern body-start
+                        "Backreference target cannot be empty"))
+      (let ((body (subseq pattern body-start end)))
+        (cond
+          ((every (function digit-char-p) body)
+           (unless (char= kind #\g)
+             (tokenizer-fail pattern body-start
+                             "\\k backreferences require a name"))
+           (let ((capture-index (parse-integer body)))
+             (when (zerop capture-index)
+               (tokenizer-fail pattern body-start
+                               "Backreference number must be positive"))
+             (values capture-index nil (1+ end) nil
+                     (and quote-p (char= kind #\g)))))
+          ((and brace-p
+                (> (length body) 1)
+                (member (char body 0) '(#\+ #\-)
+                        :test #'char=)
+                (every (function digit-char-p) (subseq body 1)))
+           (unless (char= kind #\g)
+             (tokenizer-fail pattern body-start
+                             "\\k backreferences require a name"))
+           (let ((relative-index (parse-integer body)))
+             (when (zerop relative-index)
+               (tokenizer-fail pattern body-start
+                               "Relative backreference number must be non-zero"))
+             (values nil nil (1+ end) relative-index nil)))
+          ((and brace-p
+                (or (char= kind #\g)
+                    (char= kind #\k)))
+           (unless (capture-name-start-p (char body 0))
+             (tokenizer-fail pattern body-start
+                             "Backreference name must start with an alphabetic character or underscore"))
+           (loop for character across body
+                 unless (capture-name-character-p character)
+                   do (tokenizer-fail pattern body-start
+                                      "Invalid character in backreference name"))
+           (values nil body (1+ end) nil nil))
+          (brace-p
+           (tokenizer-fail pattern body-start
+                           "Brace backreferences require a name or number"))
+          (t
+           (unless (capture-name-start-p (char body 0))
+             (tokenizer-fail pattern body-start
+                             "Backreference name must start with an alphabetic character or underscore"))
+           (loop for character across body
+                 unless (capture-name-character-p character)
+                   do (tokenizer-fail pattern body-start
+                                      "Invalid character in backreference name"))
+           (values nil body (1+ end) nil
+                   (and quote-p (char= kind #\g)))))))))
