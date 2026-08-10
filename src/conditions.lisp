@@ -23,3 +23,27 @@
      (format stream "Regular expression matching exceeded ~,3F seconds"
              (regex-timeout-seconds condition))))
   (:documentation "Signalled when a matching operation exceeds its time limit."))
+
+(define-condition fuzzy-match-unsupported (cl-regex-kit-error)
+  ((pattern :initarg :pattern :reader fuzzy-match-unsupported-pattern)
+   (reason :initarg :reason :reader fuzzy-match-unsupported-reason))
+  (:report
+   (lambda (condition stream)
+     (format stream "Fuzzy matching cannot execute ~S: ~A"
+             (fuzzy-match-unsupported-pattern condition)
+             (fuzzy-match-unsupported-reason condition))))
+  (:documentation
+   "Signalled when FUZZY-SCAN is requested for a regex outside the regular NFA dialect."))
+
+(define-condition fuzzy-match-limit-error (cl-regex-kit-error)
+  ((kind :initarg :kind :reader fuzzy-match-limit-kind)
+   (limit :initarg :limit :reader fuzzy-match-limit)
+   (used :initarg :used :reader fuzzy-match-limit-used))
+  (:report
+   (lambda (condition stream)
+     (format stream "Fuzzy matching exceeded its ~S limit ~D after ~D states"
+             (fuzzy-match-limit-kind condition)
+             (fuzzy-match-limit condition)
+             (fuzzy-match-limit-used condition))))
+  (:documentation
+   "Signalled when bounded fuzzy matching exceeds its explicit state limit."))

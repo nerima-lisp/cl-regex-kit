@@ -152,8 +152,30 @@ data while the class-generation logic lives in one place."
   "A backtracking control verb such as (*SKIP) or (*FAIL).")
 (define-regex-node callout-node (regex-node) ((number :initform 0) (tag :initform nil :documentation "Optional callout tag.")) "A PCRE2-style zero-width callout.")
 
+(defun unicode-scalar-code-p (code)
+  "Return true when CODE is a Unicode scalar value."
+  (and (integerp code)
+       (or (<= 0 code #xd7ff)
+           (<= #xe000 code #x10ffff))))
+
+(defun unicode-scalar-character-p (character)
+  "Return true when CHARACTER is a Common Lisp character in Unicode's scalar range."
+  (and (characterp character)
+       (unicode-scalar-code-p (char-code character))))
+
+(defun first-non-unicode-scalar-position (string &optional (start 0) end)
+  "Return the first invalid scalar position in STRING, or NIL."
+  (let ((limit (or end (length string))))
+    (loop for position from start below limit
+          unless (unicode-scalar-character-p (char string position))
+            do (return position))))
+
 (defun utf8-octets-for-character (character)
   "Return the UTF-8 encoding of CHARACTER as a list of octets."
+  (unless (unicode-scalar-character-p character)
+    (error 'type-error
+           :datum character
+           :expected-type '(satisfies unicode-scalar-character-p)))
   (let ((code (char-code character)))
     (cond
       ((<= code #x7f) (list code))
@@ -288,19 +310,20 @@ data while the class-generation logic lives in one place."
          control-verb-node callout-node reset-match-start-node)
      t)
     (anchor-node
-     (member (anchor-node-kind node)
-             '(:match-start :match-end :end-before-final-newline
-               :grapheme-boundary :word-boundary-unicode
-               :sentence-boundary)
-             :test #'eq))
+     (not (null
+           (member (anchor-node-kind node)
+                   '(:match-start :match-end :end-before-final-newline
+                     :grapheme-boundary :word-boundary-unicode
+                     :sentence-boundary)
+                   :test #'eq))))
     (concat-node
-     (some #'ast-contains-advanced-p (concat-node-children node)))
+     (not (null (some #'ast-contains-advanced-p (concat-node-children node)))))
     (alternation-node
-     (some #'ast-contains-advanced-p (alternation-node-branches node)))
+     (not (null (some #'ast-contains-advanced-p (alternation-node-branches node)))))
     (repetition-node
      (ast-contains-advanced-p (repetition-node-child node)))
     (group-node
-     (or (group-node-balance-name node)
+     (or (not (null (group-node-balance-name node)))
          (ast-contains-advanced-p (group-node-child node))))
     (otherwise nil)))
   (defun ast-fixed-length (node byte-mode-p)
@@ -418,8 +441,13 @@ data while the class-generation logic lives in one place."
         (assertion-node (ast-group-count (assertion-node-child node)))
         (atomic-node (ast-group-count (atomic-node-child node)))
         (conditional-node
-         (max (ast-group-count (conditional-node-yes-branch node))
-              (ast-group-count (conditional-node-no-branch node))))
+         (let ((condition (when (slot-boundp node 'condition)
+                            (conditional-node-condition node))))
+           (max (if (typep condition 'regex-node)
+                    (ast-group-count condition)
+                    0)
+                (ast-group-count (conditional-node-yes-branch node))
+                (ast-group-count (conditional-node-no-branch node)))))
         (subroutine-node
          (ast-group-count (subroutine-node-target node)))
         (otherwise 0))))

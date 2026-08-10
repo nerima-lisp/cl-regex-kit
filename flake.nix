@@ -1,5 +1,5 @@
 {
-  description = "A from-scratch Common Lisp regular expression engine with a Thompson NFA/Pike VM for regular patterns and a bounded AST executor for advanced constructs";
+  description = "A from-scratch regular expression engine for Common Lisp, built on Thompson NFA construction and Pike's VM for linear-time matching";
 
   inputs = {
     # nixos-unstable, not nixpkgs-unstable: it advances only after the NixOS
@@ -90,7 +90,7 @@
       ];
 
       meta = {
-        description = "A from-scratch Common Lisp regular expression engine with a Thompson NFA/Pike VM for regular patterns and a bounded AST executor for advanced constructs";
+        description = "A from-scratch regular expression engine for Common Lisp, built on Thompson NFA construction and Pike's VM for linear-time matching";
         homepage = "https://github.com/nerima-lisp/cl-regex-kit";
         license = lib.licenses.mit;
         platforms = lib.platforms.unix;
@@ -292,23 +292,16 @@
               "run-coverage.lisp"
             ];
             artifacts = [ "coverage/" ];
-            # Gate at 96%/92%, not 100%/100%: a line-by-line read of every
-            # flagged file (see docs/src/project/roadmap.md's "Known gaps")
-            # found that most of the remaining expression/branch gap is
-            # `sb-cover` never marking `in-package`, value-less
-            # `defvar`/`defconstant`, `defmacro`/`defclass` bodies,
-            # `defparameter` data literals, or `&key` defaults as executed,
-            # regardless of how thoroughly the surrounding code is exercised
-            # -- plus a couple of defensive `otherwise`/catch-all `error`
-            # branches guarding already-exhaustive `case`/`ecase` dispatches,
-            # which deleting would trade a small coverage-number gain for
-            # weaker protection against a future unhandled enum value. 100%
-            # is not reachable here without either regressing the suite's
-            # signal or removing that defensive code. The semantic suite
-            # currently meets these acceptance thresholds; keep them as
-            # regression gates and close reachable gaps with meaningful
-            # fixtures. Do not delete defensive `otherwise`/catch-all `error`
-            # branches merely to make the percentages green.
+            # Gate at 96%/92%, not 100%/100%. These are release thresholds:
+            # they keep the report sensitive to reachable regressions while
+            # accounting for SB-COVER structural blind spots. SB-COVER does
+            # not mark `in-package`, value-less `defvar`/`defconstant`,
+            # `defmacro`/`defclass` bodies, `defparameter` data literals, or
+            # `&key` defaults as executed, and defensive catch-all errors
+            # should remain even when the current enum is exhaustive. The
+            # generated report is still parsed as non-empty data below; a
+            # suite that passes while coverage drops below either threshold
+            # must fail this check.
             validationCommands = [
               ''
                 test -s coverage/cover-index.html

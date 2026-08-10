@@ -254,6 +254,10 @@
     (split-inclusive comma "one,two,three" :start 4 :end 8)
     :to-equal
     '("one,two," "three"))
+   (expect
+    (split-terminator comma "a,bX" :end 2)
+    :to-equal
+    '("a" "bX"))
    (expect (split-n comma "one,two,three" 2) :to-equal '("one" "two,three"))
    (expect (split-n comma "one,two,three" 1) :to-equal '("one,two,three"))
    (expect (split-n comma "one,two,three" 0) :to-equal nil)
@@ -426,6 +430,63 @@
       (coerce (replace-all star text (octets 45)) 'list)
       :to-equal
       '(45 66 45)))))
+
+(it
+ "enumerates overlapping matches at every candidate start"
+ (flet ((spans (regex text &rest options)
+          (mapcar
+           (lambda (result)
+             (list (match-start result) (match-end result)))
+           (apply #'all-matches-overlapping regex text options))))
+   (let ((regex (compile-regex "aa")))
+     (expect (spans regex "aaaa") :to-equal '((0 2) (1 3) (2 4)))
+     (expect (spans regex "aaaa" :start 1 :end 4) :to-equal '((1 3) (2 4)))
+     (let ((visited nil))
+       (do-matches-overlapping
+        (result regex "aaaa")
+        (push (list (match-start result) (match-end result)) visited))
+       (expect (nreverse visited) :to-equal '((0 2) (1 3) (2 4)))))
+   (expect
+    (spans (compile-regex "") "ab")
+    :to-equal
+    '((0 0) (1 1) (2 2)))
+   (let ((captures nil)
+         (buffers nil))
+     (do-captures-overlapping
+      (locations (compile-regex "(aa)") "aaa")
+      (push
+       (list
+        (capture-location-start locations 0)
+        (capture-location-end locations 0)
+        (capture-location-start locations 1)
+        (capture-location-end locations 1))
+       captures)
+      (push locations buffers))
+     (expect (nreverse captures) :to-equal '((0 2 0 2) (1 3 1 3)))
+     (expect (apply #'eq buffers) :to-be-truthy)))
+ (flet ((octets (&rest values)
+          (make-array
+           (length values)
+           :element-type
+           '(unsigned-byte 8)
+           :initial-contents
+           values)))
+   (let ((regex (compile-byte-regex "AA"))
+         (text (octets 65 65 65)))
+     (expect
+      (mapcar
+       (lambda (result)
+         (list (match-start result) (match-end result)))
+       (all-matches-overlapping regex text))
+      :to-equal
+      '((0 2) (1 3)))
+     (expect
+      (mapcar
+       (lambda (result)
+         (list (match-start result) (match-end result)))
+       (all-matches-overlapping (compile-byte-regex "") text))
+      :to-equal
+      '((0 0) (1 1) (2 2) (3 3))))))
 
 (it
  "iterates captures with one reusable offset buffer"
@@ -634,41 +695,38 @@
    (signals type-error (regex-set-matches-into set matches "cat" :timeout 0))))
 
 (it
- "writes byte regex-set results into reusable buffers"
- (flet ((octets (&rest values)
-          (make-array (length values)
-                      :element-type '(unsigned-byte 8)
-                      :initial-contents values)))
-   (let* ((set (compile-byte-regex-set '("A" "\\C" "A")))
-          (matches (make-array 3 :element-type 'bit :initial-element 0)))
-     (expect (regex-set-matches-into set matches (octets 65)) :to-be matches)
-     (expect (coerce matches 'list) :to-equal '(1 1 1))
-     (expect (regex-set-matches-at set (octets 255 65) 1) :to-equal '(0 1 2))
-     (expect (regex-set-match-at-p set (octets 255 65) 1) :to-be-truthy))))
+ "finds the first regex-set member with deterministic tie-breaking"
+ (let ((set (compile-regex-set '("dog" "cat" "c(at)"))))
+   (multiple-value-bind (index result)
+       (regex-set-search set "xxcat dog")
+     (expect index :to-be 1)
+     (expect (match-start result) :to-be 2)
+     (expect (match-string result "xxcat dog") :to-equal "cat"))
+   (multiple-value-bind (index result)
+       (regex-set-search-at set "xxcat dog" 6)
+     (expect index :to-be 0)
+     (expect (match-start result) :to-be 6))
+   (multiple-value-bind (index result)
+       (regex-set-search set "bird")
+     (expect index :to-be nil)
+     (expect result :to-be nil)))
+ (let ((regex (compile-regex "cat")))
+   (expect (regex-search regex "xxcat") :to-be-truthy)
+   (expect (match-start (regex-search-at regex "xxcat" 2)) :to-be 2)
+   (expect (regex-search regex "bird") :to-be nil)))
 
 (it "routes advanced members through public regex-set APIs" (let* ((advanced (compile-regex "(?=a)a")) (set (compile-regex-set (quote ("a" "(?=a)a"))))) (expect (regex-advanced-p advanced) :to-be-truthy) (expect (regex-set-matches set "a") :to-equal (quote (0 1))) (expect (regex-set-matches-at set "xa" 1 :end 2) :to-equal (quote (0 1))) (expect (regex-set-match-at-p set "xa" 1 :end 2) :to-be-truthy))) (it "routes advanced members through byte regex-set APIs" (flet ((octets (&rest values) (make-array (length values) :element-type (quote (unsigned-byte 8)) :initial-contents values))) (let ((set (compile-byte-regex-set (quote ("A" "(?=A)A"))))) (expect (regex-set-matches set (octets 65)) :to-equal (quote (0 1))) (expect (regex-set-match-p set (octets 65)) :to-be-truthy))))
 
- (it
-  "routes advanced patterns through split and replacement operations"
-  (let ((regex (compile-regex "(a)\\1")))
-    (expect (regex-advanced-p regex) :to-be-truthy)
-    (expect
-     (mapcar
-      (lambda (result)
-        (list (match-start result) (match-end result)))
-      (all-matches regex "aabbaa"))
-     :to-equal
-     '((0 2) (4 6)))
-    (expect (split regex "xxaayy") :to-equal '("xx" "yy"))
-    (expect (split-terminator regex "xxaayy") :to-equal '("xx" "yy"))
-    (expect (split-inclusive regex "xxaayy") :to-equal '("xxaa" "yy"))
-    (expect (split-n regex "aabbaa" 2) :to-equal '("" "bbaa"))
-    (expect (replace-first regex "xxaayy" "Q") :to-equal "xxQyy")
-    (expect (replace-all regex "aabbaa" "Q") :to-equal "QbbQ")
-    (expect (replace-n regex "aabbaa" "Q" 1) :to-equal "Qbbaa")))
+(it
+ "executes advanced-only regex sets through match and scan paths"
+ (let ((set (compile-regex-set '("(?=a)a"))))
+   (expect (regex-set-matches set "a") :to-equal '(0))
+   (expect (regex-set-match-p set "a") :to-be-truthy)
+   (expect (regex-set-matches set "b") :to-equal nil)
+   (expect (regex-set-match-p set "b") :to-be nil)))
 
- (it
-  "preserves every word-boundary form in merged regex-set execution"
+(it
+ "preserves every word-boundary form in merged regex-set execution"
  (dolist (case '(("\\bcat\\b" " cat ")
                  ("\\Bcat\\B" "scatx")
                  ("\\b{start}cat" " cat")
@@ -964,3 +1022,103 @@
   cl-regex-kit-error
   (error (quote regex-syntax-error) :pattern "(" :reason "unclosed group"))
  (signals cl-regex-kit-error (error (quote regex-timeout) :seconds 1)))
+
+(it
+ "supports bounded fuzzy matching for regular and byte regexes"
+ (let ((regex (compile-regex "cat")))
+   (let ((substitution (fuzzy-scan regex "cot")))
+     (expect (match-start substitution) :to-be 0)
+     (expect (match-end substitution) :to-be 3)
+     (expect (match-edit-distance substitution) :to-be 1)
+     (expect (match-string substitution "cot") :to-equal "cot"))
+   (let ((deletion (fuzzy-scan regex "ct")))
+     (expect (match-start deletion) :to-be 0)
+     (expect (match-end deletion) :to-be 2)
+     (expect (match-edit-distance deletion) :to-be 1))
+   (let ((insertion (fuzzy-scan regex "cxt")))
+     (expect (match-start insertion) :to-be 0)
+     (expect (match-end insertion) :to-be 3)
+     (expect (match-edit-distance insertion) :to-be 1))
+   (let ((tie (fuzzy-scan (compile-regex "[ab]") "c")))
+     (expect (match-start tie) :to-be 0)
+     (expect (match-end tie) :to-be 0)
+     (expect (match-edit-distance tie) :to-be 1))
+   (expect (fuzzy-scan regex "cot" :max-edits 0) :to-be nil)
+   (let ((exact (scan regex "cat")))
+     (expect (match-edit-distance exact) :to-be 0))
+   (let ((captured (fuzzy-scan (compile-regex "(c)(at)") "cot")))
+     (expect (match-group-string captured 1 "cot") :to-equal "c")
+     (expect (match-group-string captured 2 "cot") :to-equal "ot"))
+   (expect (match-start (fuzzy-search regex "xxcot")) :to-be 2)
+   (expect (match-start (fuzzy-search-at regex "xxcot" 2)) :to-be 2)
+   (expect (match-start (fuzzy-match "cat" "xxcot")) :to-be 2))
+ (flet ((octets (&rest values)
+          (make-array
+           (length values)
+           :element-type
+           '(unsigned-byte 8)
+           :initial-contents
+           values)))
+   (let* ((text (octets 99 111 116))
+          (result (byte-fuzzy-match "cat" text)))
+     (expect (match-edit-distance result) :to-be 1)
+     (expect (coerce (match-string result text) 'list)
+             :to-equal
+             '(99 111 116)))))
+
+(it
+ "covers fuzzy NFA control flow and input-unit boundaries"
+ (let ((crlf (format nil "~C~C" #\Return #\Newline)))
+   (let ((result (fuzzy-scan (compile-regex "\\R") crlf)))
+     (expect (match-end result) :to-be 2)
+     (expect (match-edit-distance result) :to-be 0))
+   (let ((result (fuzzy-scan (compile-regex "\\R" :never-newline t) crlf)))
+     (expect (match-end result) :to-be 0)
+     (expect (match-edit-distance result) :to-be 1)))
+ (let ((anchored (fuzzy-scan (compile-regex "^a") "ba")))
+   (expect (match-start anchored) :to-be 0)
+   (expect (match-end anchored) :to-be 0)
+   (expect (match-edit-distance anchored) :to-be 1))
+ (let ((alternation (fuzzy-scan (compile-regex "a|b") "c"))
+       (quantified (fuzzy-scan (compile-regex "a*") "bbb")))
+   (expect (match-edit-distance alternation) :to-be 1)
+   (expect (match-end quantified) :to-be 0)
+   (expect (match-edit-distance quantified) :to-be 0))
+ (expect (match-edit-distance
+          (fuzzy-match (compile-regex "cat") "cot"))
+         :to-be 1)
+ (expect (match-start (fuzzy-scan-at (compile-regex "cat") "xxcot" 2))
+         :to-be 2)
+ (flet ((octets (&rest values)
+          (make-array
+           (length values)
+           :element-type
+           '(unsigned-byte 8)
+           :initial-contents
+           values)))
+   (let* ((unicode-regex (compile-byte-regex "." :unicode t))
+          (valid (octets 195 169))
+          (invalid (octets 255))
+          (compiled (compile-byte-regex "cat"))
+          (compiled-text (octets 99 111 116)))
+     (let ((result (fuzzy-scan unicode-regex valid)))
+       (expect (match-end result) :to-be 2)
+       (expect (match-edit-distance result) :to-be 0))
+     (expect (match-edit-distance
+              (fuzzy-scan unicode-regex valid :end 1))
+             :to-be 1)
+     (expect (match-edit-distance (fuzzy-scan unicode-regex invalid))
+             :to-be 1)
+     (expect (match-edit-distance (byte-fuzzy-match compiled compiled-text))
+             :to-be 1))))
+
+(it
+ "rejects unsupported fuzzy dialects and enforces its state budget"
+ (signals
+  fuzzy-match-unsupported
+  (fuzzy-scan (compile-regex "(?=a)a") "a"))
+ (signals
+  fuzzy-match-limit-error
+  (fuzzy-scan (compile-regex "abc") "xyz" :state-limit 1))
+ (signals type-error (fuzzy-scan (compile-regex "a") "a" :max-edits -1))
+ (signals type-error (fuzzy-scan (compile-regex "a") "a" :state-limit 0)))

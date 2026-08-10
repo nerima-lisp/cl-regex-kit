@@ -4,7 +4,8 @@
   end
   groups
   group-names
-  mark)
+  mark
+  (edit-distance 0))
 
 (defun slot-count-for-program (program)
   (declare (type simple-vector program))
@@ -13,7 +14,7 @@
           maximize (1+ (inst-a instruction)) into maximum
         finally (return (or maximum 0))))
 
-(defun make-match-result-from-slots (slots slot-count &optional mark)
+(defun make-match-result-from-slots (slots slot-count &optional mark (edit-distance 0))
   (let ((groups (make-array (/ slot-count 2) :initial-element nil)))
     (dotimes (index (length groups))
       (let ((from (aref slots (* 2 index)))
@@ -24,7 +25,8 @@
      :start (aref slots 0)
      :end (aref slots 1)
      :groups groups
-     :mark mark)))
+     :mark mark
+     :edit-distance edit-distance)))
 
 (defun run-pike-vm (program text &key (start 0) end shortest-p longest-p never-newline-p)
   "Run PROGRAM against TEXT and return its leftmost-first match, if any.

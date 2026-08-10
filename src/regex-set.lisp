@@ -111,9 +111,7 @@ rather than the full pattern list."
                            :fill-pointer 0)))
         (flet ((store-compiled (regex index)
                  (setf (aref regexes index) regex)
-                 (if (or (and (fboundp (quote regex-advanced-p))
-                              (funcall (quote regex-advanced-p) regex))
-                         (null (regex-program regex)))
+                 (if (or (regex-advanced-p regex) (null (regex-program regex)))
                      (vector-push-extend index advanced-indices)
                    (progn
                      (vector-push-extend index ordinary-indices)
@@ -355,6 +353,42 @@ Indexes are returned in source order, including duplicate source patterns."
 This is the Rust RegexSet::matches_at equivalent. END, when supplied, remains
 the exclusive upper bound of the searched range."
   (regex-set-matches regex-set text :start start :end end :timeout timeout))
+
+(defun regex-set-search (regex-set text &key (start 0) end timeout)
+  "Find the earliest REGEX-SET member match in TEXT.
+
+Returns two values: the source-pattern index and that member's MATCH-RESULT.
+When several members begin at the same position, the lowest source-pattern
+index wins. Returns NIL, NIL when no member matches."
+  (check-type regex-set regex-set)
+  (call-with-validated-regex-set-match
+   regex-set
+   text
+   start
+   end
+   timeout
+   (lambda (limit)
+     (let ((best-index nil)
+           (best-result nil))
+       (loop for index below (regex-set-count regex-set)
+             for member = (aref (regex-set-members regex-set) index)
+             for candidate = (scan member text :start start :end limit)
+             when candidate
+               do (when (or (null best-result)
+                            (< (match-start candidate)
+                               (match-start best-result))
+                            (and (= (match-start candidate)
+                                    (match-start best-result))
+                                 (< index best-index)))
+                    (setf best-index index
+                          best-result candidate)))
+       (values best-index best-result)))))
+
+(defun regex-set-search-at (regex-set text start &key end timeout)
+  "Find the earliest REGEX-SET member match in TEXT at or after START.
+
+Returns the same two values as REGEX-SET-SEARCH."
+  (regex-set-search regex-set text :start start :end end :timeout timeout))
 
 (defun regex-set-match-p (regex-set text &key (start 0) end timeout)
   "Return true when any pattern in REGEX-SET matches within [START, END)."

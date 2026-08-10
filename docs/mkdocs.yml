@@ -6,20 +6,33 @@ repo_name: nerima-lisp/cl-regex-kit
 edit_uri: edit/main/docs/src/
 
 docs_dir: src
-
-# Also passed as --strict by packages.docs. Writing it here as well means
-# `mkdocs serve` applies the same gate, so no invocation path silently
-# tolerates a broken link. Use `mkdocs serve --no-strict` while editing.
+site_dir: ../site
+use_directory_urls: true
 strict: true
+copyright: MIT
 
 theme:
   name: material
+  language: en
+  favicon: assets/favicon.svg
   features:
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.tabs.sticky
     - navigation.sections
     - navigation.top
-    - content.code.copy
-    - content.action.edit
+    - navigation.indexes
+    - navigation.footer
+    - toc.follow
+    - search.suggest
     - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - content.action.edit
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
@@ -34,31 +47,50 @@ theme:
         icon: material/brightness-4
         name: Switch to light mode
 
+plugins:
+  - search
+
 markdown_extensions:
   - admonition
-  - toc:
-      permalink: true
+  - pymdownx.details
   - pymdownx.highlight:
       anchor_linenums: true
-  - pymdownx.superfences
-  - pymdownx.details
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.tabbed:
       alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.keys
+  - pymdownx.smartsymbols
+  - attr_list
+  - md_in_html
+  - def_list
+  - footnotes
+  - tables
+  - toc:
+      permalink: true
+      title: On this page
 
-# Every page under docs/src/ must appear here: --strict fails the build on an
-# unlisted page. docs/src/ is split into guide/ reference/ project/, with only
-# index.md, getting-started.md and assets/ at the root, per the 2026-08-01
-# revision of DOCS_STANDARD.md.
 nav:
   - Home: index.md
-  - Getting started: getting-started.md
+  - Getting Started: getting-started.md
   - Guide:
-      - Core concepts: guide/concepts.md
+      - Core Concepts: guide/core-concepts.md
   - Reference:
       - API: reference/api.md
       - Architecture: reference/architecture.md
+      - Conditions: reference/conditions.md
       - Compatibility: reference/compatibility.md
+      - Benchmarks: reference/benchmarks.md
   - Project:
+      - Development: project/development.md
       - Roadmap: project/roadmap.md
 
 not_in_nav: |

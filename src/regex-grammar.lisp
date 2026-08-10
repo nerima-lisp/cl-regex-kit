@@ -166,13 +166,415 @@ evaluated."
       (fail "Duplicate capture name" beginning))
     (when primary
       (push primary *regex-group-names*))
-(values primary target)))
+    (values primary target)))
 
-;;;; Group-level grammar is implemented in regex-grammar-groups.lisp.
+(defun parse-group ()
+  (take-token)
+  (with-parser-nesting
+    (*regex-nesting-depth*
+      *regex-nest-limit*
+      (fail "Regular expression exceeds the configured nesting limit"))
+    (labels
+        ((token-at-offset (offset)
+           (let ((position (+ *regex-token-position* offset)))
+             (and (< position (length *regex-tokens*))
+                  (aref *regex-tokens* position))))
+         (token-value-at (offset)
+           (let ((token (token-at-offset offset)))
+             (and token (token-value token))))
+         (special-group-prefix-p () (when (peek-type :question) (let ((first (token-value-at 1)) (second (token-value-at 2)) (following (token-at-offset 2))) (and (characterp first) (or (member first (list #\= #\! #\> #\( #\& #\C #\*) :test (function char=)) (and (member first (list #\+ #\-) :test (function char=)) (digit-char-p second)) (char= first #\|) (digit-char-p first) (and (char= first #\<) (characterp second) (member second (list #\= #\! #\*) :test (function char=))) (and (char= first #\P) (characterp second) (member second (list #\> #\=) :test (function char=))) (and (char= first #\R) (eq (and following (token-type following)) :rparen)))))))
+         (parse-callout ()
+  (take-token)
+  (unless (and (peek-type :char)
+               (char= (peek-value) #\C))
+    (fail "Invalid callout prefix"))
+  (take-token)
+  (let ((number 0)
+        (tag nil))
+    (cond
+      ((peek-type :rparen))
+      ((digit-token-p (peek-token))
+       (let ((digits nil))
+         (loop while (digit-token-p (peek-token))
+               do (push (token-value (take-token)) digits))
+         (setf number
+               (parse-integer
+                (coerce (nreverse digits) (quote string))))))
+      ((and (peek-token)
+            (member (token-value (peek-token))
+                    (list #\" (code-char 39) #\^ #\% #\# #\$ #\{)
+                    :test (function char=)))
+       (let* ((delimiter (token-value (take-token)))
+              (closing (if (char= delimiter #\{) #\} delimiter))
+              (characters nil))
+         (loop
+           (cond
+             ((null (peek-token))
+              (fail "Unclosed callout tag"))
+             ((and (characterp (token-value (peek-token)))
+                   (char= (token-value (peek-token)) closing))
+              (take-token)
+              (setf tag
+                    (coerce (nreverse characters) (quote string)))
+              (return))
+             ((characterp (token-value (peek-token)))
+              (push (token-value (take-token)) characters))
+             (t
+              (fail "Invalid callout tag"))))))
+      (t
+       (fail "Invalid callout")))
+    (unless (peek-type :rparen)
+      (fail "Unclosed callout"))
+    (take-token)
+    (make-instance (quote callout-node)
+                   :number number
+                   :tag tag)))
+         (read-reference-name (terminator)
+           (let ((characters nil))
+             (unless (and (peek-type :char)
+                          (capture-name-start-p (peek-value)))
+               (fail "Reference name must start with an alphabetic character or underscore"))
+             (loop while (and (peek-type :char)
+                              (capture-name-character-p (peek-value)))
+                   do (push (token-value (take-token)) characters))
+             (let ((name (coerce (nreverse characters) 'string)))
+               (if (eq terminator :rparen)
+                   (unless (peek-type :rparen)
+                     (fail "Unclosed reference"))
+                   (unless (and (peek-type :char)
+                                (char= (peek-value) terminator))
+                     (fail "Unclosed reference")))
+               (take-token)
+               name)))
+         (parse-control-verb ()
+  (take-token)
+  (let ((characters nil))
+    (loop while (and (peek-token)
+                     (peek-type :char)
+                     (not (char= (peek-value) #\:)))
+          do (push (token-value (take-token)) characters))
+    (let* ((verb-name (string-upcase (coerce (nreverse characters) (quote string))))
+           (lookaround-kind
+            (cond
+              ((member verb-name (list "POSITIVE_LOOKAHEAD" "PLA" "NON_ATOMIC_POSITIVE_LOOKAHEAD" "NAPLA") :test (function string=))
+               :lookahead)
+              ((member verb-name (list "NEGATIVE_LOOKAHEAD" "NLA")
+                       :test (function string=))
+               :negative-lookahead)
+              ((member verb-name (list "POSITIVE_LOOKBEHIND" "PLB" "NON_ATOMIC_POSITIVE_LOOKBEHIND" "NAPLB") :test (function string=))
+               :lookbehind)
+              ((member verb-name (list "NEGATIVE_LOOKBEHIND" "NLB")
+                       :test (function string=))
+               :negative-lookbehind)
+              (t nil))))
+      (if lookaround-kind
+          (progn (unless (and (peek-type :char) (char= (peek-value) #\:)) (fail "Named lookaround requires a colon")) (take-token) (let ((child (parse-alternation))) (unless (peek-type :rparen) (fail "Unclosed named lookaround")) (take-token) (make-instance (quote lookaround-node) :kind (if (member lookaround-kind (list :lookbehind :negative-lookbehind)) :lookbehind :lookahead) :child child :negative-p (not (null (member lookaround-kind (list :negative-lookahead :negative-lookbehind)))) :direction (if (member lookaround-kind (list :lookbehind :negative-lookbehind)) :backward :forward) :fixed-length nil :non-atomic-p (member verb-name (list "NON_ATOMIC_POSITIVE_LOOKAHEAD" "NAPLA" "NON_ATOMIC_POSITIVE_LOOKBEHIND" "NAPLB") :test (function string=)))))
+          (let ((verb
+                  (cond
+                    ((zerop (length verb-name)) :mark)
+                    ((member verb-name (list "FAIL" "F")
+                             :test (function string=))
+                     :fail)
+                    ((member verb-name (list "SKIP" "S")
+                             :test (function string=))
+                     :skip)
+                    ((member verb-name (list "PRUNE" "P")
+                             :test (function string=))
+                     :prune)
+                    ((member verb-name (list "COMMIT" "C")
+                             :test (function string=))
+                     :commit)
+                    ((string= verb-name "THEN") :then)
+                    ((member verb-name (list "ACCEPT" "A")
+                             :test (function string=))
+                     :accept)
+                    ((string= verb-name "MARK") :mark)
+                    (t (fail "Unknown control verb"))))
+                (argument nil))
+            (when (and (peek-type :char)
+                       (char= (peek-value) #\:))
+              (when (eq verb :fail)
+                (fail "FAIL control verb does not accept an argument"))
+              (take-token)
+              (let ((tag-characters nil))
+                (loop while (and (peek-token)
+                                 (not (peek-type :rparen)))
+                      do (unless (peek-type :char)
+                           (fail "Invalid control verb argument"))
+                         (push (token-value (take-token)) tag-characters))
+                (when (null tag-characters)
+                  (fail "Control verb argument requires a non-empty tag"))
+                (setf argument (coerce (nreverse tag-characters)
+                                       (quote string)))))
+            (when (and argument
+                       (not (member verb (list :mark :skip)
+                                    :test (function eq))))
+              (fail (format nil "~A control verb does not accept an argument"
+                            verb-name)))
+            (when (and (eq verb :mark) (null argument))
+              (fail "MARK control verb requires :tag"))
+            (unless (peek-type :rparen)
+              (fail "Unclosed control verb"))
+            (take-token)
+            (make-instance (quote control-verb-node)
+                           :verb verb
+                           :argument argument))))))
+         (parse-lookaround ()
+           (take-token)
+           (let ((backward-p nil)
+                 (negative-p nil)
+                 (non-atomic-p nil))
+             (cond
+               ((or (peek-type :star)
+                    (and (peek-type :char)
+                         (char= (peek-value) #\*)))
+                (setf non-atomic-p t)
+                (take-token))
+               ((and (peek-type :char)
+                     (member (peek-value) (list #\= #\!)
+                             :test (function char=)))
+                (setf negative-p (char= (peek-value) #\!))
+                (take-token))
+               ((and (peek-type :char)
+                     (char= (peek-value) #\<))
+                (setf backward-p t)
+                (take-token)
+                (cond
+                  ((or (peek-type :star)
+                       (and (peek-type :char)
+                            (char= (peek-value) #\*)))
+                   (setf non-atomic-p t)
+                   (take-token))
+                  ((and (peek-type :char)
+                        (member (peek-value) (list #\= #\!)
+                                :test (function char=)))
+                   (setf negative-p (char= (peek-value) #\!))
+                   (take-token))
+                  (t
+                   (fail "Lookbehind must use <=, <!, or <*"))))
+               (t
+                (fail "Invalid lookaround prefix")))
+             (when (and non-atomic-p negative-p)
+               (fail "Non-atomic lookaround must be positive"))
+             (let ((child (parse-alternation)))
+               (unless (peek-type :rparen)
+                 (fail "Unclosed lookaround"))
+               (take-token)
+               (make-instance (quote lookaround-node)
+                              :kind (if backward-p :lookbehind :lookahead)
+                              :child child
+                              :negative-p negative-p
+                              :direction (if backward-p :backward :forward)
+                              :fixed-length nil
+                              :non-atomic-p non-atomic-p))))
+         (parse-atomic ()
+           (take-token)
+           (unless (and (peek-type :char)
+                        (char= (peek-value) #\>))
+             (fail "Atomic group must use ?>"))
+           (take-token)
+           (let ((child (parse-alternation)))
+             (unless (peek-type :rparen)
+               (fail "Unclosed atomic group"))
+             (take-token)
+             (make-instance 'atomic-node :child child)))
+         (parse-subroutine ()
+  (take-token)
+  (cond
+    ((and (peek-type :char)
+          (char= (peek-value) #\&))
+     (take-token)
+     (let ((name (read-reference-name :rparen)))
+       (make-instance 'subroutine-node
+                      :target name
+                      :name name
+                      :capture-index nil
+                      :recursive-p nil)))
+    ((and (peek-type :char)
+          (char= (peek-value) #\R))
+     (take-token)
+     (unless (peek-type :rparen)
+       (fail "Recursion reference must use (?R)"))
+     (take-token)
+     (make-instance 'recursion-node
+                    :target nil
+                    :name nil
+                    :capture-index nil
+                    :recursive-p t))
+    ((and (peek-type :char)
+          (char= (peek-value) #\P)
+          (let ((next (token-at-offset 1)))
+            (and next
+                 (eq (token-type next) :char)
+                 (char= (token-value next) #\=))))
+     (take-token)
+     (take-token)
+     (let ((name (read-reference-name :rparen)))
+       (make-instance 'backreference-node
+                      :capture-index nil
+                      :name name
+                      :case-insensitive-p
+                      (flag-p +flag-case-insensitive+)
+                      :unicode-p (flag-p +flag-unicode+))))
+    ((and (peek-type :char)
+          (char= (peek-value) #\P)
+          (let ((next (token-at-offset 1)))
+            (and next
+                 (eq (token-type next) :char)
+                 (char= (token-value next) #\>))))
+     (take-token)
+     (take-token)
+     (let ((name (read-reference-name :rparen)))
+       (make-instance 'subroutine-node
+                      :target name
+                      :name name
+                      :capture-index nil
+                      :recursive-p nil)))
+    ((and (or (peek-type :plus)
+              (and (peek-type :char)
+                   (char= (peek-value) #\-)))
+          (digit-char-p (token-value-at 1)))
+     (let ((sign (token-value (take-token)))
+           (digits nil))
+       (loop while (digit-token-p (peek-token))
+             do (push (token-value (take-token)) digits))
+       (unless (peek-type :rparen)
+         (fail "Unclosed relative subroutine reference"))
+       (take-token)
+       (let* ((relative-index
+                (parse-integer
+                 (coerce (cons sign (nreverse digits)) 'string)))
+              (target (+ (1+ *regex-group-count*) relative-index)))
+         (unless (and (plusp target)
+                      (<= target *regex-group-count*))
+           (fail "Relative subroutine reference is unavailable"))
+         (make-instance 'subroutine-node
+                        :target target
+                        :name nil
+                        :capture-index target
+                        :recursive-p nil))))
+    ((digit-token-p (peek-token))
+     (let ((digits nil))
+       (loop while (digit-token-p (peek-token))
+             do (push (token-value (take-token)) digits))
+       (unless (peek-type :rparen)
+         (fail "Unclosed subroutine reference"))
+       (take-token)
+       (let ((target
+               (parse-integer
+                (coerce (nreverse digits) 'string))))
+         (if (zerop target)
+             (make-instance 'recursion-node
+                            :target target
+                            :name nil
+                            :capture-index target
+                            :recursive-p t)
+             (make-instance 'subroutine-node
+                            :target target
+                            :name nil
+                            :capture-index target
+                            :recursive-p nil)))))
+    (t
+     (fail "Invalid subroutine reference"))))
+         (parse-conditional ()
+           (take-token)
+           (unless (peek-type :lparen)
+             (fail "Conditional group must start with a condition"))
+           (take-token)
+           (let ((condition
+                   (cond
+                     ((peek-type :question)
+                      (parse-lookaround))
+                     ((digit-token-p (peek-token))
+                      (let ((digits nil))
+                        (loop while (digit-token-p (peek-token))
+                              do (push (token-value (take-token)) digits))
+                        (unless (peek-type :rparen)
+                          (fail "Unclosed conditional condition"))
+                        (take-token)
+                        (list :capture-index
+                              (parse-integer
+                               (coerce (nreverse digits) (quote string))))))
+                     ((and (peek-type :char)
+                           (char= (peek-value) (code-char 60)))
+                      (take-token)
+                      (let ((name (read-reference-name (code-char 62))))
+                        (unless (peek-type :rparen)
+                          (fail "Unclosed conditional condition"))
+                        (take-token)
+                        (list :name name)))
+                     ((and (peek-type :char)
+                           (char= (peek-value) (code-char 82)))
+                      (take-token)
+                      (cond
+                        ((peek-type :rparen)
+                         (take-token)
+                         :recursion)
+                        ((digit-token-p (peek-token))
+                         (let ((digits nil))
+                           (loop while (digit-token-p (peek-token))
+                                 do (push (token-value (take-token)) digits))
+                           (unless (peek-type :rparen)
+                             (fail "Unclosed recursive condition"))
+                           (take-token)
+                           (list :recursion-index
+                                 (parse-integer
+                                  (coerce (nreverse digits) (quote string))))))
+                        ((and (peek-type :char)
+                              (char= (peek-value) (code-char 38)))
+                         (take-token)
+                         (list :recursion-name
+                               (read-reference-name :rparen)))
+                        (t
+                         (fail "Invalid recursive condition"))))
+                     ((and (peek-type :char)
+                           (capture-name-start-p (peek-value)))
+                      (let ((name (read-reference-name :rparen)))
+                        (cond
+                          ((string= name "DEFINE") :define)
+                          (t (list :name name)))))
+                     (t
+                      (fail "Conditional group requires a capture reference")))))
+             (let ((yes-branch (parse-concatenation))
+                   (no-branch (if (peek-type :pipe)
+                                  (progn
+                                    (take-token)
+                                    (parse-concatenation))
+                                  (make-concat nil))))
+               (unless (peek-type :rparen)
+                 (fail "Unclosed conditional group"))
+               (take-token)
+               (make-instance 'conditional-node
+                              :condition condition
+                              :yes-branch yes-branch
+                              :no-branch no-branch))))
+         (parse-special-group () (let ((first (token-value-at 1))) (cond ((not (characterp first)) (fail "Invalid special group prefix")) ((char= first #\=) (parse-lookaround)) ((char= first #\!) (parse-lookaround)) ((char= first #\C) (parse-callout)) ((char= first #\*) (parse-lookaround)) ((char= first #\<) (parse-lookaround)) ((char= first #\>) (parse-atomic)) ((char= first #\() (parse-conditional)) ((char= first #\|) (take-token) (take-token) (let ((base *regex-group-count*) (maximum *regex-group-count*) (branches nil)) (loop (setf *regex-group-count* base) (push (parse-concatenation) branches) (setf maximum (max maximum *regex-group-count*)) (if (peek-type :pipe) (take-token) (return))) (setf *regex-group-count* maximum) (unless (peek-type :rparen) (fail "Unclosed branch-reset group")) (take-token) (if (cdr branches) (make-instance (quote alternation-node) :branches (nreverse branches)) (car branches)))) ((or (char= first #\&) (char= first #\P) (char= first #\R) (char= first #\+) (char= first #\-) (digit-char-p first)) (parse-subroutine)) (t (fail "Invalid special group prefix"))))))
+      (cond
+        ((peek-type :star)
+         (parse-control-verb))
+        ((special-group-prefix-p)
+         (parse-special-group))
+        (t
+         (multiple-value-bind (capturing-p name scoped-flags bare-flags-p balance-name)
+             (parse-group-prefix)
+           (if bare-flags-p
+               (make-concat nil)
+               (let ((capture-index
+                       (when capturing-p (incf *regex-group-count*)))
+                     (child (parse-alternation)))
+                 (unless (peek-type :rparen)
+                   (fail "Unclosed group"))
+                 (take-token)
+                 (when scoped-flags
+                   (setf *regex-flags* scoped-flags))
+                 (make-instance (quote group-node)
+                                :child child
+                                :capture-index capture-index
+                                :name name
+                                :balance-name balance-name)))))))))
 
 (defun parse-atom ()
-
-(when (at-end-p)
+  (when (at-end-p)
     (fail "Expected an expression"))
   (let ((token (peek-token)))
     (case (token-type token)
@@ -488,6 +890,12 @@ unconsumed for the quantifier grammar to see -- simply not taking the
 Signals REGEX-SYNTAX-ERROR on malformed input."
   (unless (stringp pattern)
     (error 'regex-syntax-error :pattern pattern :reason "Pattern must be a string"))
+  (let ((invalid-position (first-non-unicode-scalar-position pattern)))
+    (when invalid-position
+      (error 'regex-syntax-error
+             :pattern pattern
+             :position invalid-position
+             :reason "Pattern contains a non-Unicode-scalar character")))
   (check-type initial-flags (integer 0 *))
   (check-type byte-mode boolean)
   (check-type literal boolean)

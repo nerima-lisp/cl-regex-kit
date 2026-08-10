@@ -43,12 +43,20 @@
    #:regex-set-empty-p
    #:regex-set-matches
    #:regex-set-matches-at
+   #:regex-set-search
+   #:regex-set-search-at
    #:regex-set-matches-into
    #:regex-set-match-p
    #:regex-set-match-at-p
    ;; Matching and iteration
    #:scan
    #:scan-at
+   #:regex-search
+   #:regex-search-at
+   #:fuzzy-scan
+   #:fuzzy-scan-at
+   #:fuzzy-search
+   #:fuzzy-search-at
    #:captures
    #:captures-at
    #:shortest-match
@@ -56,9 +64,44 @@
    #:longest-match
    #:match
    #:byte-match
+   #:fuzzy-match
+   #:byte-fuzzy-match
    #:all-matches
+   #:all-matches-overlapping
    #:do-matches
+   #:do-matches-overlapping
    #:do-captures
+   #:do-captures-overlapping
+   #:regex-stream
+   #:regex-stream-p
+   #:make-regex-stream
+   #:regex-stream-regex
+   #:regex-stream-start
+   #:regex-stream-timeout
+   #:regex-stream-length
+   #:regex-stream-text
+   #:regex-stream-finished-p
+   #:regex-stream-feed
+   #:regex-stream-finish
+   #:regex-stream-reset
+   #:incremental-regex-stream
+   #:incremental-regex-stream-p
+   #:make-incremental-regex-stream
+   #:incremental-regex-stream-regex
+   #:incremental-regex-stream-start
+   #:incremental-regex-stream-timeout
+   #:incremental-regex-stream-position
+   #:incremental-regex-stream-finished-p
+   #:incremental-regex-stream-feed
+   #:incremental-regex-stream-finish
+   #:incremental-regex-stream-reset
+   #:scan-stream
+   #:all-stream-matches
+   #:all-stream-matches-overlapping
+   #:do-stream-matches
+   #:do-stream-matches-overlapping
+   #:do-stream-captures
+   #:do-stream-captures-overlapping
    #:is-match-p
    #:is-match-at
    #:full-match
@@ -86,6 +129,7 @@
    #:match-start
    #:match-end
    #:match-mark
+   #:match-edit-distance
    #:match-string
    #:match-captures
    #:match-group-start
@@ -99,6 +143,13 @@
    #:regex-syntax-error-reason
    #:regex-timeout
    #:regex-timeout-seconds
+   #:fuzzy-match-unsupported
+   #:fuzzy-match-unsupported-pattern
+   #:fuzzy-match-unsupported-reason
+   #:fuzzy-match-limit-error
+   #:fuzzy-match-limit-kind
+   #:fuzzy-match-limit
+   #:fuzzy-match-limit-used
    #:advanced-regex-limit-error
    #:advanced-regex-limit-kind
    #:advanced-regex-limit

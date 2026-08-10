@@ -12,7 +12,7 @@ test system additionally uses [cl-weave](https://github.com/nerima-lisp/cl-weave
 and the CLI system requires [cl-cli](https://github.com/nerima-lisp/cl-cli).
 
 Start with [Getting started](getting-started.md), then read [Core
-concepts](guide/concepts.md) for the parser -> NFA -> Pike's VM pipeline and
+concepts](guide/core-concepts.md) for the parser -> NFA -> Pike's VM pipeline and
 [Compatibility](reference/compatibility.md) for what this engine deliberately does not
 support.
 
@@ -32,7 +32,7 @@ support.
 
     Why an NFA simulation instead of backtracking, and how captures survive it.
 
-    [:octicons-arrow-right-24: Core concepts](guide/concepts.md)
+    [:octicons-arrow-right-24: Core concepts](guide/core-concepts.md)
 
 -   :material-format-list-bulleted: **Look something up**
 

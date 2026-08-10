@@ -100,9 +100,120 @@ OPTIONS are passed to COMPILE-BYTE-REGEX."
     (assertion-node (collect-group-names (assertion-node-child node)))
     (atomic-node (collect-group-names (atomic-node-child node)))
     (conditional-node
-     (append (collect-group-names (conditional-node-yes-branch node))
+     (append (when (typep (conditional-node-condition node) 'regex-node)
+               (collect-group-names (conditional-node-condition node)))
+             (collect-group-names (conditional-node-yes-branch node))
              (collect-group-names (conditional-node-no-branch node))))
+    (subroutine-node
+     (when (typep (subroutine-node-target node) 'regex-node)
+       (collect-group-names (subroutine-node-target node))))
     (otherwise nil)))
+
+(defun validate-advanced-references (ast pattern)
+  "Reject advanced references that cannot resolve in AST.
+
+The parser deliberately accepts forward references and several PCRE spelling
+variants.  Resolving them here gives every public compilation entry point the
+same deterministic failure instead of deferring an unresolved reference to
+advanced matching, where it would otherwise look like an ordinary no-match or
+runtime error."
+  (let* ((group-count (ast-group-count ast))
+         (group-names (collect-group-names ast)))
+    (labels ((fail (format-control &rest arguments)
+               (error 'regex-syntax-error
+                      :pattern pattern
+                      :reason (apply #'format nil format-control arguments)))
+             (name-string (name)
+               (and (or (stringp name) (symbolp name))
+                    (string name)))
+             (validate-name (name kind)
+               (let ((normalized (name-string name)))
+                 (unless (and normalized
+                              (some (lambda (entry)
+                                      (string= normalized (string (car entry))))
+                                    group-names))
+                   (fail "Unresolved ~A reference ~S" kind name))))
+             (validate-index (index kind)
+               (unless (and (integerp index)
+                            (plusp index)
+                            (<= index group-count))
+                 (fail "Unresolved ~A reference ~S (capture count is ~D)"
+                       kind index group-count)))
+             (validate-condition (condition)
+               (cond
+                 ((typep condition 'regex-node)
+                  (visit condition))
+                 ((member condition '(:define :recursion) :test #'eq)
+                  nil)
+                 ((consp condition)
+                  (case (first condition)
+                    (:capture-index
+                     (validate-index (second condition) "capture condition"))
+                    (:name
+                     (validate-name (second condition) "conditional"))
+                    (:recursion-index
+                     (validate-index (second condition) "recursion condition"))
+                    (:recursion-name
+                     (validate-name (second condition) "recursion condition"))
+                    (otherwise
+                     (fail "Unsupported conditional reference ~S" condition))))
+                 (t
+                  (fail "Unsupported conditional reference ~S" condition))))
+             (validate-subroutine (node)
+               (let* ((target (subroutine-node-target node))
+                      (name (subroutine-node-name node))
+                      (capture-index (subroutine-node-capture-index node))
+                      (recursive-p (or (typep node 'recursion-node)
+                                       (subroutine-node-recursive-p node))))
+                 (when name
+                   (validate-name name "subroutine"))
+                 (when (and capture-index
+                            (not (and recursive-p (zerop capture-index))))
+                   (validate-index capture-index "subroutine"))
+                 (cond
+                   ((typep target 'regex-node)
+                    (visit target))
+                   ((and target (or (stringp target) (symbolp target)))
+                    (validate-name target "subroutine"))
+                   ((integerp target)
+                    (if (and recursive-p (zerop target))
+                        nil
+                        (validate-index target "subroutine")))
+                   ((and recursive-p (null target)) nil)
+                   (t
+                    (fail "Unresolved subroutine reference ~S" target)))))
+             (visit (node)
+               (when (typep node 'regex-node)
+                 (typecase node
+                   (backreference-node
+                    (let ((name (backreference-node-name node))
+                          (capture-index (backreference-node-capture-index node)))
+                      (cond
+                        (name (validate-name name "backreference"))
+                        (capture-index (validate-index capture-index "backreference"))
+                        (t (fail "Backreference has no target")))))
+                   (concat-node
+                    (mapc #'visit (concat-node-children node)))
+                   (alternation-node
+                    (mapc #'visit (alternation-node-branches node)))
+                   (repetition-node
+                    (visit (repetition-node-child node)))
+                   (possessive-repetition-node
+                    (visit (possessive-repetition-node-child node)))
+                   (group-node
+                    (visit (group-node-child node)))
+                   (assertion-node
+                    (visit (assertion-node-child node)))
+                   (atomic-node
+                    (visit (atomic-node-child node)))
+                   (conditional-node
+                    (validate-condition (conditional-node-condition node))
+                    (visit (conditional-node-yes-branch node))
+                    (visit (conditional-node-no-branch node)))
+                   (subroutine-node
+                    (validate-subroutine node))
+                   (otherwise nil)))))
+      (visit ast))))
 
 (defun matcher-contains-unicode-property-p (matcher)
   "Return true when MATCHER depends on Unicode scalar matching."
@@ -202,8 +313,9 @@ independently-computed call that could silently drift from it."
   "Shared tail of COMPILE-REGEX/COMPILE-BYTE-REGEX.
 
 Safe patterns are compiled to the existing Thompson-NFA program. Patterns
-using features that need ordered backtracking retain their AST and are
-executed by the bounded advanced matcher instead."
+  using features that need ordered backtracking retain their AST and are
+  executed by the bounded advanced matcher instead."
+  (validate-advanced-references ast pattern)
   (annotate-lookbehind-lengths ast byte-mode-p)
   (let ((advanced-p (ast-contains-advanced-p ast)))
     (multiple-value-bind (program group-count)

@@ -108,7 +108,11 @@
               :to-be-truthy)
       (expect (typep (cl-regex-kit::normalize-byte-literals alternation)
                      'cl-regex-kit::alternation-node)
-              :to-be-truthy))))
+              :to-be-truthy))
+    (let ((surrogate (code-char #xd800)))
+      (when surrogate
+        (signals type-error
+          (cl-regex-kit::utf8-octets-for-character surrogate))))))
 
 (it-property
   "UTF-8 encoding round-trips for every generated Unicode scalar"

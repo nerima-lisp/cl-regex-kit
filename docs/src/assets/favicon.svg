@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">cl-regex-kit</title>
+  <rect width="64" height="64" rx="12" fill="#00897b"/>
+  <path d="M16 18h32M16 32h32M16 46h20" stroke="#fff" stroke-width="6" stroke-linecap="round"/>
+  <circle cx="46" cy="46" r="7" fill="#fff"/>
+</svg>

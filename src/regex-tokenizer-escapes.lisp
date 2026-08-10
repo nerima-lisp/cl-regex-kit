@@ -32,7 +32,10 @@
   (and character (or (ascii-alphabetic-p character) (digit-char-p character))))
 
 (defun unicode-scalar-character (pattern code position)
-  (if (and (< code char-code-limit) (not (<= #xD800 code #xDFFF))) (code-char code)
+  (if (and (unicode-scalar-code-p code)
+           (< code char-code-limit)
+           (code-char code))
+      (code-char code)
     (tokenizer-fail pattern position "Unicode escape is not a Unicode scalar value")))
 
 (defun scan-while (pattern position predicate)
@@ -82,6 +85,7 @@ mode whitespace tolerance inside the braces."
         (next (1+ position)))
     (case escaped
       (#\a (values (code-char 7) nil next))
+      (#\e (values (code-char 27) nil next))
       (#\f (values #\Page nil next))
       (#\n (values #\Newline nil next))
       (#\r (values #\Return nil next))

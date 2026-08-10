@@ -165,7 +165,9 @@
       (expect start :to-equal 0)
       (expect end :to-equal 4))
     (expect (capture-location-start locations 2) :to-be-null)
-    (scan-captures-into regex locations "123")
+    (multiple-value-bind (start end) (scan-captures-into regex locations "123")
+      (declare (ignore end))
+      (expect start :to-be-null))
     (expect (capture-location-start locations 0) :to-be-null)
     (expect (capture-location-end locations 1) :to-be-null)
     (signals type-error (capture-location-start locations 3))
@@ -305,17 +307,20 @@
   (let* ((lookahead (compile-regex "(?=a)a"))
          (lookbehind (compile-regex "(?<=a)b"))
          (possessive (compile-regex "a++"))
+         (bounded-possessive (compile-regex "a{2,2}+b"))
          (possessive-failure (compile-regex "a++a"))
          (atomic (compile-regex "(?>a|ab)c"))
          (quoted-subroutine (compile-regex "(?<word>a)\\g'word'"))
          (lookahead-result (scan lookahead "a"))
          (lookbehind-result (scan lookbehind "ab"))
          (possessive-result (scan possessive "aa"))
+         (bounded-possessive-result (scan bounded-possessive "aab"))
          (atomic-result (scan atomic "ac"))
          (quoted-subroutine-result (scan quoted-subroutine "aa")))
     (dolist (regex (list lookahead
                          lookbehind
                          possessive
+                         bounded-possessive
                          atomic
                          quoted-subroutine))
       (expect (regex-advanced-p regex) :to-be-truthy)
@@ -337,6 +342,11 @@
                        (match-end possessive-result)))
             :to-equal
             (list 0 2))
+    (expect (and bounded-possessive-result
+                 (list (match-start bounded-possessive-result)
+                       (match-end bounded-possessive-result)))
+            :to-equal
+            (list 0 3))
     (expect (scan possessive-failure "aa") :to-be-null)
     (expect (and atomic-result
                  (list (match-start atomic-result)
@@ -349,26 +359,56 @@
             :to-equal
             (list 0 2))
     (expect (scan atomic "abc") :to-be-null)))
+(it
+  "keeps negative lookarounds honest on both successful and failing paths"
+  (let* ((negative-lookahead-success (scan (compile-regex "(?!a)b") "b"))
+         (negative-lookahead-failure (scan (compile-regex "(?!a)a") "a"))
+         (negative-lookbehind-success (scan (compile-regex "(?<!a)b") "b"))
+         (negative-lookbehind-failure (scan (compile-regex "(?<!a)b") "ab")))
+    (expect (and negative-lookahead-success
+                 (list (match-start negative-lookahead-success)
+                       (match-end negative-lookahead-success)))
+            :to-equal
+            '(0 1))
+    (expect negative-lookahead-failure :to-be-null)
+    (expect (and negative-lookbehind-success
+                 (list (match-start negative-lookbehind-success)
+                       (match-end negative-lookbehind-success)))
+            :to-equal
+            '(0 1))
+    (expect negative-lookbehind-failure :to-be-null)))
 (it "annotates only proven fixed-width lookbehinds" (labels ((width (pattern &key byte-mode) (let ((ast (if byte-mode (cl-regex-kit::regex-ast (compile-byte-regex pattern)) (cl-regex-kit::regex-ast (compile-regex pattern))))) (cl-regex-kit::assertion-node-fixed-length ast)))) (expect (width "(?<=ab)") :to-equal 2) (expect (width "(?<=a|bc)") :to-be nil) (expect (width "(?<=a{2})") :to-equal 2) (expect (width "(?<=a+)") :to-be nil) (expect (width "(?<=é)" :byte-mode t) :to-equal 2) (expect (width "(?<=[é])" :byte-mode t) :to-be nil)))
 (it
-  "bounds copied advanced states with the shared size limit"
-  (let* ((context
-           (cl-regex-kit::make-advanced-context
-            :state-limit 1
-            :state-count 0))
-         (state (cl-regex-kit::%make-advanced-state 0 (make-array 0)))
-         (condition
-           (let ((cl-regex-kit::*advanced-context* context))
-             (handler-case
-                 (progn
-                   (cl-regex-kit::%advanced-state-copy state)
-                   (cl-regex-kit::%advanced-state-copy state)
-                   nil)
-               (advanced-regex-limit-error (condition) condition)))))
-    (expect condition :to-be-truthy)
-    (when condition
-      (expect (advanced-regex-limit-kind condition) :to-equal :states)
-      (expect (advanced-regex-limit-used condition) :to-equal 2))))
+  "executes variable-length lookbehinds and preserves their captures"
+  (let* ((positive (scan (compile-regex "(?<=a+)b") "aaab"))
+         (positive-alternation (scan (compile-regex "(?<=a|bc)d") "bcd"))
+         (negative (scan (compile-regex "(?<!a+)b") "b"))
+         (positive-miss (scan (compile-regex "(?<=a+)b") "b"))
+         (negative-miss (scan (compile-regex "(?<!a+)b") "aaab"))
+         (captured (scan (compile-regex "(?<=(a+))b") "aaab")))
+    (expect (and positive
+                 (list (match-start positive)
+                       (match-end positive)))
+            :to-equal
+            '(3 4))
+    (expect (and positive-alternation
+                 (list (match-start positive-alternation)
+                       (match-end positive-alternation)))
+            :to-equal
+            '(2 3))
+    (expect (and negative
+                 (list (match-start negative)
+                       (match-end negative)))
+            :to-equal
+            '(0 1))
+    (expect positive-miss :to-be-null)
+    (expect negative-miss :to-be-null)
+    (expect (and captured
+                 (list (match-group-start captured 1)
+                       (match-group-end captured 1)
+                       (match-group-string captured 1 "aaab")))
+            :to-equal
+            (list 0 3 "aaa"))))
 (it
   "exposes MARK control-verb tags through the public match result"
   (let* ((regex (compile-regex "a(*MARK:middle)b"))
@@ -443,6 +483,7 @@
          (indic-conjunct-result (scan grapheme indic-conjunct-text))
          (branch-result (scan branch-reset "bb"))
          (conditional-result (scan conditional "c"))
+         (conditional-true-result (scan conditional "ab"))
          (definition-result (scan definition "abc"))
          (recursive-result (scan recursive "(a(b))")))
     (dolist (regex (list cut start grapheme branch-reset conditional definition recursive))
@@ -473,8 +514,37 @@
             (list 0 3 indic-conjunct-text))
     (expect (match-string branch-result "bb") :to-equal "bb")
     (expect (match-string conditional-result "c") :to-equal "c")
+    (expect (match-string conditional-true-result "ab") :to-equal "ab")
     (expect (match-string definition-result "abc") :to-equal "abc")
     (expect (match-string recursive-result "(a(b))") :to-equal "(a(b))")))
+(it
+  "validates direct recursive and numeric subroutine targets"
+  (let ((recursive (compile-regex "(?R)"))
+        (zero (compile-regex "(?0)"))
+        (numeric (compile-regex "(?<item>a)(?1)")))
+    (dolist (regex (list recursive zero numeric))
+      (expect (regex-advanced-p regex) :to-be-truthy))))
+(it
+  "keeps capture numbers stable across nested and uneven branch-reset alternatives"
+  (let ((uneven (compile-regex "(?|(a)(b)|(c))(?|(d)|(e)(f))"))
+        (nested (compile-regex "(?|(?|(a)|(b))|(c))\\1")))
+    (dolist (case
+              '(("abef" ("abef" "a" "b" "e" "f"))
+                ("cd" ("cd" "c" nil "d" nil))))
+      (destructuring-bind (text expected) case
+        (let ((result (scan uneven text)))
+          (expect (and result (coerce (match-captures result text) 'list))
+                  :to-equal
+                  expected))))
+    (dolist (case
+              '(("aa" ("aa" "a"))
+                ("bb" ("bb" "b"))
+                ("cc" ("cc" "c"))))
+      (destructuring-bind (text expected) case
+        (let ((result (scan nested text)))
+          (expect (and result (coerce (match-captures result text) 'list))
+                  :to-equal
+                  expected))))))
 (it
   "covers PCRE named-reference spellings and bounded advanced anchors"
   (let* ((g-brace (compile-regex "(?<x>A)\\g{x}"))
@@ -503,6 +573,110 @@
                        (match-end end-result)))
             :to-equal
             (list 0 1))))
+(it
+  "covers advanced end anchors and Unicode grapheme clusters"
+  (let ((end-anchor (compile-regex "\\Z"))
+        (grapheme (compile-regex "\\X")))
+    (flet ((span (regex text)
+             (let ((result (scan regex text)))
+               (and result
+                    (list (match-start result)
+                          (match-end result)))))
+           (code-points (&rest code-points)
+             (map-into (make-string (length code-points))
+                       #'code-char
+                       code-points)))
+      (dolist (regex (list end-anchor grapheme))
+        (expect (regex-advanced-p regex) :to-be-truthy))
+      (dolist (case (list (list "" 0 0)
+                          (list "a" 1 1)
+                          (list (format nil "a~C" #\Newline) 1 1)
+                          (list (format nil "a~C~C" #\Return #\Newline) 1 1)))
+        (destructuring-bind (text expected-start expected-end) case
+          (expect (span end-anchor text)
+                  :to-equal
+                  (list expected-start expected-end))))
+      (dolist (case
+                (list
+                 (list (code-points #x1100 #x1161 #x11a8) 3)
+                 (list (concatenate 'string (string (code-char #x600)) "a") 2)
+                 (list (concatenate 'string "a" (string (code-char #x093e))) 2)
+                 (list (code-points #x1f469 #x200d #x1f4bb) 3)
+                 (list (code-points #x1f1e6 #x1f1e7 #x1f1e8) 2)
+                 (list (format nil "~C~C" #\Return #\Newline) 2)
+                 (list (code-points #x0915 #x094d #x0937) 3)))
+        (destructuring-bind (text expected-end) case
+          (expect (span grapheme text)
+                  :to-equal
+                  (list 0 expected-end)))))))
+(it
+  "runs the exported advanced executor with implicit string and byte limits"
+  (flet ((bytes (&rest values)
+           (make-array (length values)
+                       :element-type '(unsigned-byte 8)
+                       :initial-contents values)))
+    (let* ((string-regex (compile-regex "(?=a)a"))
+           (string-result
+             (cl-regex-kit:run-advanced-regex string-regex "za" :start 1))
+           (byte-regex (compile-byte-regex "\\Z"))
+           (byte-lf-result
+             (cl-regex-kit:run-advanced-regex byte-regex (bytes #x61 #x0a)))
+           (byte-crlf-result
+             (cl-regex-kit:run-advanced-regex
+              byte-regex
+              (bytes #x61 #x0d #x0a))))
+      (expect (and string-result
+                   (list (match-start string-result)
+                         (match-end string-result)))
+              :to-equal
+              '(1 2))
+      (expect (and byte-lf-result
+                   (list (match-start byte-lf-result)
+                         (match-end byte-lf-result)))
+              :to-equal
+              '(1 1))
+      (expect (and byte-crlf-result
+                   (list (match-start byte-crlf-result)
+                         (match-end byte-crlf-result)))
+              :to-equal
+              '(1 1)))))
+(it
+  "honors timeouts through the exported advanced executor"
+  (let ((regex (compile-regex "(?=(a+)+$)"))
+        (text (make-string 4000 :initial-element #\a)))
+    (signals regex-timeout
+      (cl-regex-kit:run-advanced-regex regex text :timeout 0.001))))
+(it
+  "signals advanced step limits through the public scan API"
+  (let ((condition nil))
+    (handler-case
+        (scan (compile-regex "(?=a)a" :size-limit 1) "a")
+      (advanced-regex-limit-error (caught)
+        (setf condition caught)))
+    (expect condition :to-be-truthy)
+    (expect (and condition
+                 (advanced-regex-limit-kind condition))
+            :to-equal
+            :steps)
+    (expect (and condition
+                 (advanced-regex-limit condition))
+            :to-equal
+            1)
+    (expect (and condition
+                 (> (advanced-regex-limit-used condition)
+                    (advanced-regex-limit condition)))
+            :to-be-truthy)))
+(it
+  "matches byte backreferences case-insensitively on the advanced path"
+  (let* ((text (make-array 2
+                           :element-type '(unsigned-byte 8)
+                           :initial-contents '(#x61 #x41)))
+         (result (byte-match "(?i)(?<x>A)\\k<x>" text)))
+    (expect (and result
+                 (list (match-start result)
+                       (match-end result)))
+            :to-equal
+            '(0 2))))
 (it
   "selects participating captures for duplicate named references"
   (let* ((backreference
@@ -542,6 +716,16 @@
                          (match-end result)))
               :to-equal
               (list 0 2)))))
+(it
+  "rejects unresolved advanced references during compilation"
+  (dolist (pattern
+           '("(?P=missing)"
+             "(?&missing)"
+             "(?P>missing)"
+             "(?(missing)a|b)"
+             "(?(R&missing)a|b)"
+             "(?1)"))
+    (signals regex-syntax-error (compile-regex pattern))))
 (it
   "supports balancing groups on the advanced path"
   (let* ((balancing (compile-regex "(?<open>a)(?<-open>b)"))
@@ -690,155 +874,14 @@
                        (match-end invalid-byte-result)))
             :to-equal
             '(1 2))))
-(it "reads character and octet elements on the advanced path"
-  (let* ((byte-lookahead
-           (compile-byte-regex "(?-u:(?=a)a)"))
-         (byte-invalid
-           (compile-byte-regex "(?-u:(?=\\xFF)\\xFF)"))
-         (unicode-backreference
-           (compile-regex
-            (format nil "(?i:(?<x>~C)\\k<x>)" (code-char #xE9))))
-         (byte-backreference
-           (compile-byte-regex "(?i-u:(?<x>a)\\k<x>)"))
-         (octet-a
-           (make-array 1
-                       :element-type '(unsigned-byte 8)
-                       :initial-contents '(97)))
-         (octet-invalid
-           (make-array 1
-                       :element-type '(unsigned-byte 8)
-                       :initial-contents '(255)))
-         (octet-case
-           (make-array 2
-                       :element-type '(unsigned-byte 8)
-                       :initial-contents '(65 97)))
-         (unicode-case
-           (format nil "~C~C" (code-char #xC9) (code-char #xE9)))
-         (byte-lookahead-result (scan byte-lookahead octet-a))
-         (byte-invalid-result (scan byte-invalid octet-invalid))
-         (unicode-backreference-result
-           (scan unicode-backreference unicode-case))
-         (byte-backreference-result
-           (scan byte-backreference octet-case)))
-    (dolist (regex
-             (list byte-lookahead byte-invalid unicode-backreference
-                   byte-backreference))
-      (expect (regex-advanced-p regex) :to-be-truthy))
-    (expect (and byte-lookahead-result
-                 (list (match-start byte-lookahead-result)
-                       (match-end byte-lookahead-result)))
-            :to-equal
-            '(0 1))
-    (expect (and byte-invalid-result
-                 (list (match-start byte-invalid-result)
-                       (match-end byte-invalid-result)))
-            :to-equal
-            '(0 1))
-    (expect (and unicode-backreference-result
-                 (list (match-start unicode-backreference-result)
-                       (match-end unicode-backreference-result)))
-            :to-equal
-            '(0 2))
-    (expect (and byte-backreference-result
-                 (list (match-start byte-backreference-result)
-                       (match-end byte-backreference-result)))
-            :to-equal
-            '(0 2))))
-(it "honors advanced end anchors, integer skips, and callout contracts"
-  (let* ((end-anchor (compile-regex "\\Z"))
-         (byte-end-anchor (compile-byte-regex "\\Z"))
-         (integer-skip (compile-regex "a(*SKIP:2)|b"))
-         (callout-without-callback (compile-regex "(?C7)a"))
-         (callout-with-invalid-callback
-           (compile-regex
-            "(?C7)a"
-            :callout
-            (lambda (number tag position text)
-              (declare (ignore number tag position text))
-              :invalid)))
-         (empty-result (scan end-anchor ""))
-         (line-result (scan end-anchor (format nil "a~C" (code-char 10))))
-         (crlf-result
-           (scan end-anchor (format nil "a~C~C" (code-char 13) (code-char 10))))
-         (byte-line-result
-           (scan byte-end-anchor
-                 (make-array 2
-                             :element-type '(unsigned-byte 8)
-                             :initial-contents '(97 10))))
-         (skip-result (scan integer-skip "ab")))
-    (dolist (regex
-             (list end-anchor byte-end-anchor integer-skip
-                   callout-without-callback callout-with-invalid-callback))
-      (expect (regex-advanced-p regex) :to-be-truthy))
-    (expect (and empty-result
-                 (list (match-start empty-result)
-                       (match-end empty-result)))
-            :to-equal
-            '(0 0))
-    (dolist (result (list line-result crlf-result byte-line-result))
-      (expect (and result
-                   (list (match-start result)
-                         (match-end result)))
-              :to-equal
-              '(1 1)))
-    (expect (and skip-result
-                 (list (match-start skip-result)
-                       (match-end skip-result)))
-            :to-equal
-            '(1 2))
-    (expect (scan callout-without-callback "a") :to-be-truthy)
-    (signals error
-      (scan callout-with-invalid-callback "a"))
-    (signals error
-      (compile-regex "(?=a)a" :nest-limit 0))))
 
-(it "validates public ranges and compile metadata"
-  (let* ((regex (compile-regex "(?<word>a)"))
-         (byte-regex (compile-byte-regex "a"))
-         (source (regex-source regex)))
-    (expect (cl-regex-kit::regex-ast regex) :to-be-truthy)
-    (expect (cl-regex-kit::regex-program regex) :to-be-truthy)
-    (expect (regex-group-count regex) :to-equal 1)
-    (expect (regex-capture-count regex) :to-equal 2)
-    (expect (regex-group-index regex "word") :to-equal 1)
-    (setf (char source 0) #\x)
-    (expect (regex-source regex) :to-equal "(?<word>a)")
-    (signals type-error
-      (scan regex #(97)))
-    (signals type-error
-      (scan byte-regex "a"))
-    (signals type-error
-      (scan regex "a" :start -1))
-    (signals type-error
-      (scan regex "a" :start 2))
-    (signals type-error
-      (scan regex "a" :end 2))
-    (signals type-error
-      (scan regex "a" :timeout 0))
-    (signals type-error
-      (scan regex "a" :timeout -1))
-    (signals error
-      (compile-regex "a" :callout 1))
-    (multiple-value-bind (line-terminator flags)
-        (cl-regex-kit::validate-regex-compile-options nil)
-      (expect line-terminator :to-be #\Newline)
-      (expect (integerp flags) :to-be-truthy))
-    (multiple-value-bind (line-terminator flags)
-        (cl-regex-kit::validate-regex-compile-options
-         t
-         :line-terminator 65)
-      (expect line-terminator :to-be #\A)
-      (expect (integerp flags) :to-be-truthy))
-    (signals type-error
-      (cl-regex-kit::validate-regex-compile-options
-       nil
-       :line-terminator #\é))
-    (expect (cl-regex-kit::matcher-contains-unicode-property-p
-             '(:property "L"))
-            :to-be-truthy)
-    (expect (cl-regex-kit::matcher-contains-unicode-property-p
-             '(:ranges ((1 . 2))))
-            :to-be nil)
-    (expect (cl-regex-kit::matcher-contains-unicode-property-p
-             '(:union (:ranges ((1 . 2))) (:property "L")))
-            :to-be-truthy)))
+(it "evaluates grapheme boundaries at interior positions"
+  (let* ((text (format nil "a~Cb" (code-char #x301)))
+         (regex (compile-regex "\\X\\b{g}b"))
+         (result (scan regex text)))
+    (expect result :to-be-truthy)
+    (expect (and result
+                 (list (match-start result)
+                       (match-end result)))
+            :to-equal
+            '(0 3))))

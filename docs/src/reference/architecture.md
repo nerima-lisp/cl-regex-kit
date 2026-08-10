@@ -67,6 +67,9 @@ src/
                   selection for the advanced evaluator
   api-operations.lisp
                   non-overlapping iteration and split operations
+  streaming.lisp  chunk-fed buffering adapter and stream-oriented matching helpers
+  incremental-streaming.lisp
+                  bounded-memory incremental NFA matcher for consuming chunks
   api-replace.lisp
                   replacement templates and replacement operations
   regex-set.lisp  multi-pattern compilation and matching
@@ -79,7 +82,7 @@ cli/
 ```
 
 `src/` is flat, per the org's [package
-standard](https://github.com/nerima-lisp/.github/blob/main/PACKAGE_STANDARD.md#リポジトリ直下の構成):
+standard](https://github.com/nerima-lisp/.github/blob/main/PACKAGE_STANDARD.md):
 the `.asd` `:components` list is the table of contents, and every public
 symbol lives in `src/package.lisp`. `cli/` is a second, equally flat
 component tree for the `cl-regex-kit/cli` system (`cl-regex-kit.asd`), which
@@ -88,9 +91,15 @@ builds the `cl-regex-kit-grep` executable rather than a library.
 The API modules follow the execution direction rather than grouping unrelated
 public functions in one file: `api.lisp` creates immutable compiled values,
 `api-match.lisp` executes one match, `api-operations.lisp` consumes the match
-stream for iteration and splitting, and `api-replace.lisp` adds replacement
-template expansion.  This keeps matching independent of higher-level
-operations and makes the ASDF serial order the dependency order.
+stream for iteration and splitting, `streaming.lisp` collects caller-provided
+chunks behind an explicit finish barrier,
+`incremental-streaming.lisp` carries ordinary consuming-NFA state across
+chunks, and `api-replace.lisp` adds replacement template expansion. The two
+streaming modules deliberately expose different contracts: the first preserves
+the full input so every matcher feature remains available, while the second
+bounds input memory by limiting the supported expression subset. This keeps
+matching independent of higher-level operations and makes the ASDF serial order
+the dependency order.
 
 Compilation selects one of two execution paths.  A regular AST is lowered to
 an NFA and executed by the Pike VM; an AST containing capture-dependent or
@@ -102,7 +111,7 @@ value.
 
 ## Data flow
 
-See [Core concepts](../guide/concepts.md) for the full explanation of each stage. In
+See [Core concepts](../guide/core-concepts.md) for the full explanation of each stage. In
 one line: `parser-syntax.lisp`, `regex-tokenizer*.lisp`,
 `regex-grammar*.lisp`, and `nfa.lisp` are pure compilation (pattern in,
 program out, or a `regex-syntax-error`); `parser-syntax.lisp` owns
@@ -378,6 +387,7 @@ adjacent, which would not preserve it.
   infrastructure, respectively. `cl-regex-kit` is a pure, deterministic
   computation over strings and octet vectors with no I/O, no subprocesses, and
   no interactive surface outside the separate `cl-regex-kit/cli` system;
-  adopting any of these would be exactly the "変にAdapterを作らず" principle's
-  counter-example -- a dependency bent to a use it wasn't designed for, rather
-  than one that already fits.
+  adopting any of these would be exactly the "avoid adding an adapter merely to
+  force a dependency into the design" principle's counter-example -- a
+  dependency bent to a use it wasn't designed for, rather than one that already
+  fits.

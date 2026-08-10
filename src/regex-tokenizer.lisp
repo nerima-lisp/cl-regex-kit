@@ -118,7 +118,7 @@ next-position); TYPE is :ESCAPE for every recognized form."
         (#\b (if class-mode-p
                   (token (list :kind :literal :char (code-char 8)) next)
                   (token (list :kind :word-boundary :which :word-boundary) next)))
-        ((#\a #\f #\n #\r #\t #\v)
+        ((#\a #\e #\f #\n #\r #\t #\v)
          (multiple-value-bind (character raw-octet-p after) (scan-escaped-character pattern position)
            (declare (ignore raw-octet-p))
            (token (list :kind :control :char character) after)))

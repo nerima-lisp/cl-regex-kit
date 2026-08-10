@@ -7,8 +7,8 @@
 (in-package #:asdf-user)
 
 (asdf:defsystem "cl-regex-kit"
-  :description "A from-scratch Common Lisp regular expression engine with a Thompson NFA/Pike VM for regular patterns and a bounded AST executor for advanced constructs"
-  :long-description "cl-regex-kit parses patterns into an AST. Regular patterns are compiled to a Thompson NFA program and matched by a Pike VM thread simulation -- the architecture used by RE2 and the Rust regex crate -- with linear-time matching for a fixed program. Patterns with capture-dependent or ordered-backtracking constructs, such as backreferences and lookaround, use a separate AST executor with configurable step and nesting limits; the linear-time guarantee applies to the regular path, not to arbitrary advanced patterns."
+  :description "A from-scratch regular expression engine for Common Lisp, built on Thompson NFA construction and Pike's VM for linear-time matching"
+  :long-description "cl-regex-kit compiles a pattern to an AST, then to a Thompson-constructed NFA program, and matches the regular subset with a Pike VM thread simulation -- the architecture used by RE2 and the Rust regex crate -- preserving linear-time behavior for a fixed compiled program. Constructs that require non-regular semantics, including backreferences and lookaround, use a separate bounded ordered-backtracking executor with explicit resource limits."
   :author "takeokunn <bararararatty@gmail.com>"
   :maintainer "takeokunn <bararararatty@gmail.com>"
   :license "MIT"
@@ -29,6 +29,7 @@
                (:file "unicode-age-data-3")
                (:file "unicode-age-data")
                (:file "unicode-binary-property-range-data")
+               (:file "unicode-indic-conjunct-break-data")
                (:file "unicode-properties")
                (:file "unicode-property-runtime")
                (:file "unicode-property-resolver")
@@ -40,7 +41,6 @@
                (:file "regex-tokenizer")
                (:file "regex-grammar-support")
                (:file "regex-grammar")
-               (:file "regex-grammar-groups")
                (:file "regex-grammar-classes")
                (:file "nfa")
                (:module
@@ -55,10 +55,17 @@
                  (:file "pike-vm-capture")
                  (:file "pike-vm-set")))
                (:file "api")
-               (:file "api-match")
+               (:file "advanced-state")
+               (:file "advanced-input")
+               (:file "advanced-grapheme")
+               (:file "advanced-captures")
+               (:file "advanced-boundaries")
                (:file "advanced-match")
-               (:file "advanced-runner")
+               (:file "api-match")
+               (:file "fuzzy-match")
                (:file "api-operations")
+               (:file "streaming")
+               (:file "incremental-streaming")
                (:file "api-replace")
                (:file "regex-set"))
   :in-order-to ((test-op (test-op "cl-regex-kit/test"))))
@@ -94,7 +101,6 @@
   :serial t
   :components ((:file "package")
                (:file "matchers")
-               (:file "advanced-cases-test")
                (:file "ast-test")
                (:file "parser-test")
                (:file "nfa-test")
@@ -105,7 +111,13 @@
                (:file "api-options-test")
                (:file "api-operations-test")
                (:file "api-operations-byte-test")
+               (:file "streaming-test")
+               (:file "incremental-streaming-test")
                (:file "api-replace-test")
+               (:file "advanced-edge-test")
+               (:file "advanced-boundary-test")
+               (:file "ast-edge-test")
+               (:file "tokenizer-edge-test")
                (:file "cli-test"))
   :perform (test-op
             (operation component)

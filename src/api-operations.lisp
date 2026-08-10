@@ -41,6 +41,37 @@
                 when (> ,position-var ,length-var)
                   do (loop-finish)))))))
 
+(defmacro do-matches-overlapping ((match regex text &key (start 0) end timeout) &body body)
+  "Evaluate BODY for every match of REGEX, including overlapping matches.
+
+Unlike DO-MATCHES, the next search begins one input unit after the start of
+the current match.  For strings an input unit is a character; for byte
+vectors it is an octet.  Empty matches are therefore reported at every
+eligible input position."
+  (let ((regex-var (gensym "REGEX-"))
+        (text-var (gensym "TEXT-"))
+        (position-var (gensym "POSITION-"))
+        (end-var (gensym "END-"))
+        (timeout-var (gensym "TIMEOUT-")))
+    `(let ((,regex-var ,regex)
+           (,text-var ,text)
+           (,position-var ,start)
+           (,end-var ,end)
+           (,timeout-var ,timeout))
+       (check-type ,regex-var regex)
+       (setf ,end-var (validate-text-range ,regex-var ,text-var ,position-var ,end-var))
+       (call-with-timeout
+        ,timeout-var
+        (lambda ()
+          (loop while (<= ,position-var ,end-var)
+                for ,match = (scan ,regex-var ,text-var
+                                   :start ,position-var
+                                   :end ,end-var)
+                while ,match
+                do (progn
+                     ,@body
+                     (setf ,position-var (1+ (match-start ,match))))))))))
+
 (defmacro do-captures ((locations regex text &key (start 0) end timeout) &body body)
   "Evaluate BODY for each non-overlapping match with reusable capture offsets.
 
@@ -55,10 +86,35 @@ BODY invocation. Its contents are valid only until the next iteration."
          (let ((,locations ,locations-var))
            ,@body)))))
 
+(defmacro do-captures-overlapping ((locations regex text &key (start 0) end timeout) &body body)
+  "Evaluate BODY for every overlapping match with reusable capture offsets.
+
+LOCATIONS is bound once to a CAPTURE-LOCATIONS buffer and updated before every
+BODY invocation. Its contents are valid only until the next iteration."
+  (let ((regex-var (gensym "REGEX-"))
+        (locations-var (gensym "LOCATIONS-")))
+    `(let* ((,regex-var ,regex)
+            (,locations-var (regex-capture-locations ,regex-var)))
+       (do-matches-overlapping (result ,regex-var ,text
+                                       :start ,start
+                                       :end ,end
+                                       :timeout ,timeout)
+         (copy-match-result-to-capture-locations result ,locations-var)
+         (let ((,locations ,locations-var))
+           ,@body)))))
+
 (defun all-matches (regex text &key (start 0) end timeout)
   "Return every non-overlapping MATCH-RESULT of REGEX in TEXT, left to right."
   (let ((matches nil))
     (do-matches
+      (result regex text :start start :end end :timeout timeout)
+      (push result matches))
+    (nreverse matches)))
+
+(defun all-matches-overlapping (regex text &key (start 0) end timeout)
+  "Return every overlapping MATCH-RESULT of REGEX, left to right."
+  (let ((matches nil))
+    (do-matches-overlapping
       (result regex text :start start :end end :timeout timeout)
       (push result matches))
     (nreverse matches)))

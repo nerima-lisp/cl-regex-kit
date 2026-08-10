@@ -1,7 +1,5 @@
 (in-package #:cl-regex-kit)
 
-(declaim (ftype function run-advanced-regex))
-
 (defun validate-input-range (text start end)
   "Validate a half-open input range and return its exclusive end."
   (unless (and (integerp start) (<= 0 start (length text)))
@@ -14,7 +12,14 @@
 (defun validate-string-range (text start end)
   "Validate a string text range and return its exclusive end."
   (check-type text string)
-  (validate-input-range text start end))
+  (let ((limit (validate-input-range text start end)))
+    (let ((invalid-position
+            (first-non-unicode-scalar-position text start limit)))
+      (when invalid-position
+        (error 'type-error
+               :datum (char text invalid-position)
+               :expected-type '(satisfies unicode-scalar-character-p))))
+    limit))
 
 (defun validate-text-range (regex text start end)
   "Validate a public half-open text range for REGEX and return its end."
@@ -116,10 +121,11 @@ Expands to a CALL-WITH-VALIDATED-MATCH invocation whose continuation dispatches
 advanced regexes directly to RUN-ADVANCED-REGEX, while ordinary regexes use
 RUN-PIKE-VM with the :start/:end/:never-newline-p arguments every SCAN-shaped
 entry point supplies, plus VM-KEYS for the one flag (:shortest-p or
-:longest-p) that distinguishes it from a plain leftmost-first SCAN. This is
-the one place that assembles the ordinary RUN-PIKE-VM call, so SCAN,
-SHORTEST-MATCH, and LONGEST-MATCH differ only in VM-KEYS and what BODY does
-with RESULT.
+:longest-p) that distinguishes it from a plain leftmost-first SCAN. The main
+ASDF system loads the advanced backend before this file, so the direct call is
+always available. This is the one place that assembles both execution calls,
+so SCAN, SHORTEST-MATCH, and LONGEST-MATCH differ only in VM-KEYS and what BODY
+does with RESULT.
 
 REGEX/TEXT/START/END/TIMEOUT are each evaluated exactly once, in the order
 written, regardless of how many times the expansion below references them."
@@ -139,12 +145,12 @@ written, regardless of how many times the expansion below references them."
                (lambda (limit)
                  (if (regex-advanced-p ,regex-var)
                      (run-advanced-regex
-                      ,regex-var
-                      ,text-var
+                      ,regex-var ,text-var
                       :start ,start-var
                       :end limit
-                      :never-newline-p (regex-never-newline-p ,regex-var)
-                      ,@vm-keys)
+                      :shortest-p ,(getf vm-keys :shortest-p)
+                      :longest-p ,(getf vm-keys :longest-p)
+                      :never-newline-p (regex-never-newline-p ,regex-var))
                      (run-pike-vm (regex-program ,regex-var) ,text-var
                                   :start ,start-var
                                   :end limit
@@ -167,6 +173,19 @@ number of seconds, or NIL to impose no deadline."
 This is the Rust Regex::find_at equivalent. END, when supplied, remains the
 exclusive upper bound of the searched range."
   (scan regex text :start start :end end :timeout timeout))
+
+(defun regex-search (regex text &key (start 0) end timeout)
+  "Find REGEX's first match in TEXT.
+
+This is a discoverable search-named alias for SCAN. It returns the same
+MATCH-RESULT and accepts the same half-open range and TIMEOUT arguments."
+  (scan regex text :start start :end end :timeout timeout))
+
+(defun regex-search-at (regex text start &key end timeout)
+  "Find REGEX's first match in TEXT at or after START.
+
+This is the required-position form of REGEX-SEARCH."
+  (regex-search regex text :start start :end end :timeout timeout))
 
 (defun captures (regex text &key (start 0) end timeout)
   "Return REGEX's leftmost-first capture result in TEXT, or NIL.
@@ -199,7 +218,9 @@ and every location after an unsuccessful scan contain NIL."
   (let ((result (scan regex text :start start :end end :timeout timeout)))
     (when result
       (copy-match-result-to-capture-locations result locations)
-      (values (match-result-start result) (match-result-end result)))))
+      (return-from scan-captures-into
+        (values (match-result-start result) (match-result-end result))))
+    (values nil nil)))
 
 (defun scan-captures-into-at (regex locations text start &key end timeout)
   "Scan TEXT at or after START and write REGEX's capture offsets into LOCATIONS.
@@ -288,6 +309,14 @@ NIL.  The returned vector never exposes the VM's capture slots."
   "The last MARK control-verb tag reached by the match, or NIL."
   (check-type match-result match-result)
   (match-result-mark match-result))
+
+(defun match-edit-distance (match-result)
+  "The number of insertions, deletions, and substitutions in MATCH-RESULT.
+
+Ordinary exact matching returns zero. Fuzzy matching returns the minimum
+bounded distance selected for the match."
+  (check-type match-result match-result)
+  (match-result-edit-distance match-result))
 
 (defun resolve-group-index (match-result index)
   (check-type match-result match-result)

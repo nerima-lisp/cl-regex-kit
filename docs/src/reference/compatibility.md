@@ -41,7 +41,7 @@ that every pattern still has the NFA path's worst-case bound.
   `\\N` for a non-newline character, `\\R` for a line-break sequence (including
   CRLF as one consuming unit), and named characters such as
   `\\N{LATIN CAPITAL LETTER A}`
-- `\\a`, `\\f`, `\\n`, `\\r`, `\\t`, `\\v`, one- through three-digit `\\ooo`, braced octal `\\o{...}`, `\\xHH`, `\\x{...}`, `\\uHHHH`,
+- `\\a`, `\\e`, `\\f`, `\\n`, `\\r`, `\\t`, `\\v`, one- through three-digit `\\ooo`, braced octal `\\o{...}`, `\\xHH`, `\\x{...}`, `\\uHHHH`,
   `\\u{...}`, `\\UHHHHHHHH`, and `\\U{...}` escapes (including character classes), plus RE2-style
   `\\Q...\\E` quoted literals
 - `.` and inline `i`, `m`, `s`, `R`, `U`, `x`, and `u` flags, including scoped and disabling
@@ -66,11 +66,33 @@ that every pattern still has the NFA path's worst-case bound.
   first, bounded, and all replacement through `replace-first`, `replace-n`,
   and `replace-all`, with Rust-style capture templates (`$0`, `$name`,
   `${name}`, and `$$`)
+- Explicit overlapping traversal through `all-matches-overlapping`,
+  `do-matches-overlapping`, and `do-captures-overlapping`; these restart one
+  input unit after each match start and report zero-width matches at every
+  eligible input position. The ordinary traversal, split, and replacement
+  APIs remain non-overlapping.
+- `do-matches` and `do-captures` are callback iteration over a complete input
+  value. For chunk-oriented callers, `make-regex-stream` accepts string or
+  octet chunks and preserves the complete input until `regex-stream-finish`
+  (or the `all-stream-*`/`scan-stream` helpers) runs the ordinary matcher.
+  This is a stateful buffering adapter, not a low-latency or bounded-memory
+  incremental VM; arbitrary lookaround, backreferences, and end anchors still
+  require the finish barrier.
 - RE2/Rust-style multi-pattern matching through `compile-regex-set`,
   `regex-set-count`, `regex-set-empty-p`, `regex-set-matches`,
   `regex-set-matches-at`, `regex-set-matches-into`, `regex-set-match-p`, and
   `regex-set-match-at-p`; duplicate patterns retain their individual source
   indexes
+
+## Bounded fuzzy matching
+
+`fuzzy-scan`, `fuzzy-search`, and their `-at` forms provide bounded
+Levenshtein-style insertions, deletions, and substitutions for regular NFA
+regexes. `fuzzy-match` and `byte-fuzzy-match` are compile-on-demand helpers;
+`match-edit-distance` reports the selected distance. `max-edits` controls the
+edit bound and `state-limit` controls the fuzzy search budget. Advanced
+ordered-backtracking regexes are rejected with `fuzzy-match-unsupported`
+rather than being assigned a different fuzzy meaning.
 
 ## Advanced ordered-backtracking syntax
 
@@ -105,10 +127,10 @@ regular NFA alone:
   no-ops.
 
 The advanced executor honors `:size-limit` as a maximum evaluation-step
-budget and `:nest-limit` as the recursion-depth limit. A timeout can
-also be supplied through the existing matching APIs. These limits are
-resource safeguards, not a claim of linear-time matching for arbitrary
-backtracking patterns.
+budget and `:nest-limit` as the recursion-depth limit. The public
+`run-advanced-regex` entry point accepts the same `:timeout` keyword as the
+other matching APIs. These limits are resource safeguards, not a claim of
+linear-time matching for arbitrary backtracking patterns.
 
 ## Compilation options
 
@@ -133,29 +155,40 @@ inside their group. For
 example, `:case-insensitive t` makes the whole expression case-insensitive,
 while `(?-i:...)` restores case-sensitive matching for the nested expression.
 
-`:size-limit` bounds the emitted NFA instruction count and defaults to
-100000. For `compile-regex-set`, it also bounds the final merged NFA,
-including its set-dispatch instructions. `:nest-limit` bounds nested group
-depth and defaults to 250.
-Exceeding either limit signals `regex-syntax-error` before the engine attempts
-matching. `:size-limit` is a program-size limit, not Rust `regex`'s
-byte-oriented `RegexBuilder::size_limit`.
+For NFA-compatible patterns, `:size-limit` bounds the emitted NFA instruction
+count and defaults to 100000. For `compile-regex-set`, it also bounds the final
+merged NFA, including its set-dispatch instructions. `:nest-limit` bounds
+nested group depth and defaults to 250. Exceeding either limit on this path
+signals `regex-syntax-error` before matching. `:size-limit` is a program-size
+limit, not Rust `regex`'s byte-oriented `RegexBuilder::size_limit`.
+
+For advanced patterns, the AST is retained instead of emitting an NFA:
+`:size-limit` becomes the maximum evaluation-step budget, while `:nest-limit`
+still limits parser nesting and also guards advanced execution depth. Runtime
+exhaustion signals `advanced-regex-limit-error`.
 
 `:octal` defaults to `t` for RE2/Rust-compatible one- through three-digit
 `\\ooo` escapes. Values outside the byte range are rejected. Set it to `nil`
 to reject those escapes, matching Rust `RegexBuilder`'s default behavior.
 
-Every matching entry point accepts `:timeout`, a positive number of seconds.
-On expiry it signals `regex-timeout`; the default `nil` imposes no deadline.
-This uses SBCL's timeout facility and shares the project's SBCL-only
-portability boundary.
+Complete-input matching entry points accept `:timeout`, a positive number of
+seconds. The chunked state constructor and stream helpers accept the same
+keyword; it covers matching and stream callbacks, and is applied around the
+adapter's input-read loop. A blocking read supplied by an external or foreign
+stream may not be interruptible, so a hard I/O deadline requires an input stream
+that provides its own bounded/non-blocking behavior.
+`regex-stream-finish` uses the timeout stored by `make-regex-stream` and does
+not accept a separate timeout keyword. On expiry the API signals
+`regex-timeout`; the default `nil` imposes no deadline. This uses SBCL's
+timeout facility and shares the project's SBCL-only portability boundary.
 
 ## Outside current dialect
 
 The advanced path deliberately stops short of embedding another language or
-running arbitrary pattern code. Perl code interpolation, fuzzy matching, and
-control verbs not listed above are outside the current dialect. They should be
-rejected as syntax rather than silently compiled with different meaning.
+running arbitrary pattern code. Perl code interpolation and control verbs not
+listed above are outside the current dialect. Fuzzy matching is available for
+the regular NFA subset only; it rejects advanced patterns rather than
+silently compiling them with different meaning.
 
 ## Why this trade
 
@@ -174,41 +207,37 @@ characters, so `\1` is not a capture reference.
 
 ## Current differences
 
-- Unicode property support combines SBCL's Unicode runtime predicates with
-  generated Unicode 17.0.0 UCD tables. Case-insensitive matching uses the
-  generated Unicode 17.0.0 simple-case-folding table, and `Age` uses the
-  generated Unicode 17.0.0 age table. General categories, `Script`, `Block`,
-  and runtime-only binary properties exposed by SBCL (including `Hex_Digit`,
-  `Cased`, `Case_Ignorable`, `Default_Ignorable_Code_Point`, `Ideographic`,
-  `Math`, `Soft_Dotted`, and `Bidi_Mirrored`) continue to follow SBCL's
-  Unicode version. The generated UCD 17.0.0 ranges provide `Bidi_Control`,
-  `Deprecated`, `Emoji`, `Emoji_Component`, `Emoji_Modifier`,
-  `Emoji_Modifier_Base`, `Emoji_Presentation`, `Extended_Pictographic`,
-  `Grapheme_Link`, `Logical_Order_Exception`, `Other_Grapheme_Extend`,
+- Unicode property support is backed by SBCL's Unicode data. Case-insensitive
+  matching uses Rust regex-syntax's generated Unicode 16 simple-case-folding
+  table. General categories, Script, Block, Age, and the binary
+  properties exposed by SBCL (including `Hex_Digit`, `Cased`,
+  `Case_Ignorable`, `Default_Ignorable_Code_Point`, `Ideographic`, `Math`,
+  `Soft_Dotted`, and `Bidi_Mirrored`) are supported. The engine also
+  provides Unicode 16 range definitions for `Bidi_Control`, `Deprecated`,
+  `Emoji`, `Emoji_Component`, `Emoji_Modifier`, `Emoji_Modifier_Base`,
+  `Emoji_Presentation`, `Extended_Pictographic`, `Grapheme_Link`,
+  `Logical_Order_Exception`, `Other_Grapheme_Extend`,
   `Prepended_Concatenation_Mark`, `Radical`, `Dash`, `Hyphen`,
   `Pattern_Syntax`, `Quotation_Mark`, `Sentence_Terminal`,
-  `Terminal_Punctuation`, `Unified_Ideograph`, `IDS_*_Operator`,
-  `Noncharacter_Code_Point`, `Pattern_White_Space`, `Regional_Indicator`,
-  and `Variation_Selector`, including their UCD short aliases accepted by
-  Rust regex (`Dia`, `IDSB`, `JoinC`, `MCM`, `OAlpha`, `OIDC`, `PatSyn`,
-  `XIDS`, and `XIDC`, for example). It additionally provides generated UCD
-  17.0.0 ranges for `ID_Compat_Math_*`, `Indic_Conjunct_Break`,
-  `Modifier_Combining_Mark`, and the `Other_*` binary properties.
-  `Word_Break` uses the generated UCD 17.0.0 table; `Grapheme_Cluster_Break`
-  and `Sentence_Break` remain backed by SBCL metadata. Segmentation
-  properties accept UCD short and long property and value forms, such as
-  `GCB=RI`, `Word_Break=Katakana`, and `SB=AT`. `ID_Start` and `ID_Continue`
-  are calculated from SBCL general categories plus the UCD-defined
-  exceptions. `scx` and `Script_Extensions` use generated UCD 17.0.0 range
-  data in addition to SBCL's `Script` property, and are therefore distinct
-  from `sc` and `Script`. Script aliases such as `\\p{Grek}`, `\\p{Greek}`,
-  `scx=Hira`, `Script=Greek`, `Block=Greek_And_Coptic`, `Age=V15_0`,
-  `Age=15.1`, `Age=V15_1`, `Age=17.0`, and the Rust alias `Age=v151` are
-  supported. Regenerate or verify the checked-in static tables with
-  `perl tools/generate-unicode-data.pl --ucd-dir DIR --check` after obtaining
-  the official Unicode 17.0.0 UCD; the UCD source is not vendored. Unknown
-  names and values signal `regex-syntax-error`; they are never silently
-  compiled as a class that cannot match.
+  `Terminal_Punctuation`, `Unified_Ideograph`,
+  `IDS_*_Operator`, `Noncharacter_Code_Point`, `Pattern_White_Space`,
+  `Regional_Indicator`, and `Variation_Selector`, including their UCD short
+  aliases accepted by Rust regex (`Dia`, `IDSB`, `JoinC`, `MCM`, `OAlpha`,
+  `OIDC`, `PatSyn`, `XIDS`, and `XIDC`, for example). It additionally provides
+  Unicode 16 static ranges for `ID_Compat_Math_*`,
+  `Indic_Conjunct_Break`, `Modifier_Combining_Mark`, and the `Other_*`
+  binary properties. Segmentation properties accept UCD short and long property and value
+forms, such as `GCB=RI`, `Word_Break=Katakana`, and `SB=AT`.
+  `ID_Start` and `ID_Continue` are calculated from SBCL general
+  categories plus the UCD-defined exceptions. `scx` and `Script_Extensions`
+  use static Unicode 16 range data in
+  addition to SBCL's Script property, and are therefore distinct from `sc` and
+  `Script`. Script aliases such as `\\p{Grek}`, `\\p{Greek}`,
+  `scx=Hira`, `Script=Greek`,
+`Block=Greek_And_Coptic`, `Age=V15_0`, `Age=15.1`, `Age=V15_1`, and the Rust
+alias `Age=v151` are supported. Age uses the same static Unicode 16 range data as
+  Rust `regex-syntax`. Unknown names and values signal `regex-syntax-error`;
+  they are never silently compiled as a class that cannot match.
 - The project currently targets SBCL; portability across Common Lisp
   implementations has not been established.
 - `compile-byte-regex`, `byte-regex`, `compile-byte-regex-set`, and
@@ -228,12 +257,18 @@ characters, so `\1` is not a capture reference.
   forms.
   Character `Regex` values preserve Rust's UTF-8 invariant: raw scopes that
   could match invalid UTF-8 bytes are rejected at compilation. Use
-  `compile-byte-regex` when raw octet matching is required.
+  `compile-byte-regex` when raw octet matching is required. Character-domain
+  APIs also reject Common Lisp strings containing surrogate code points (or
+  other non-scalar character values) in the selected input range with a
+  `type-error`; source patterns containing them signal `regex-syntax-error`.
 - To retain predictable compilation resources, a compiled NFA program is
   limited to 100000 instructions. Patterns exceeding this limit signal
   `regex-syntax-error` rather than allocating without bound.
-- `regex-set` merges member NFAs and scans the input once. Its Pike VM uses
-  work bounded by the product of text length and total member-program size;
-  this is not a DFA-based RE2 `Set` implementation.
+- `regex-set` merges NFA-compatible member programs and scans the input once.
+  Members requiring advanced ordered backtracking are retained separately and
+  evaluated individually, so a set containing them does not promise one scan
+  for every member. The merged Pike VM uses work bounded by the product of text
+  length and total member-program size; this is not a DFA-based RE2 `Set`
+  implementation.
 
 See the [Roadmap](../project/roadmap.md) for planned extensions.

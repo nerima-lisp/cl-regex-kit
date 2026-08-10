@@ -23,6 +23,18 @@
         (member character '(#\_ #\- #\Space)))
       name)))
 
+(defun normalized-property-value-name (name)
+  "Normalize a Unicode property value using UAX #44 loose matching.
+
+In addition to the separators handled by NORMALIZED-PROPERTY-NAME, UAX #44
+allows one leading IS prefix on a property value.  Keep the two-character
+value IS intact: it is a real alias in some Unicode property domains."
+  (let ((normalized (normalized-property-name name)))
+    (if (and (> (length normalized) 2)
+             (string= normalized "IS" :end1 2 :end2 2))
+        (subseq normalized 2)
+        normalized)))
+
 (defun property-value (property prefixes)
   (loop for prefix in prefixes
         when (and
@@ -30,9 +42,17 @@
       (string= property prefix :end1 (length prefix) :end2 (length prefix)))
           do (return (subseq property (length prefix)))))
 
+(defun property-value-loose (property prefixes)
+  (let ((value (property-value property prefixes)))
+    (and value (normalized-property-value-name value))))
+
 (defun canonical-script-name (name)
   "Return NAME normalized to its Unicode Script long alias."
-  (and name (or (cdr (assoc name +unicode-script-aliases+ :test #'string=)) name)))
+  (and name
+       (let ((normalized (normalized-property-value-name name)))
+         (or (cdr (assoc normalized +unicode-script-aliases+
+                         :test #'string=))
+             normalized))))
 
 (progn
   (defparameter +unicode-runtime-domain-functions+
@@ -110,12 +130,15 @@
           collect name)))
 (defun canonical-segmentation-property-value (value aliases)
   "Return VALUE normalized to its UCD long alias."
-  (and value (or (cdr (assoc value aliases :test (function string=))) value)))
+  (and value
+       (let ((normalized (normalized-property-value-name value)))
+         (or (cdr (assoc normalized aliases :test (function string=)))
+             normalized))))
 
 (defun known-block-property-name (raw-property)
   "Return RAW-PROPERTY as a known Unicode block name, or NIL."
   (let ((candidate
-          (or (property-value raw-property (list "BLK=" "BLOCK="))
+          (or (property-value-loose raw-property (list "BLK=" "BLOCK="))
               (and (> (length raw-property) 2)
                    (string= raw-property "IN" :end1 2 :end2 2)
                    (subseq raw-property 2)))))
@@ -146,14 +169,26 @@
   "Return the UCD 17.0.0 ranges denoted by the Rust-compatible Age VALUE."
   (let* ((compact (remove #\_ (string-downcase value)))
          (direct
-        (find
-          compact
-          +unicode-age-ranges+
-          :key
-          (lambda (entry)
-            (remove #\_ (string-downcase (car entry))))
-          :test
-          #'string=)))
+           (or
+             (find
+               compact
+               +unicode-age-ranges+
+               :key
+               (lambda (entry)
+                 (remove #\_ (string-downcase (car entry))))
+               :test
+               #'string=)
+             ;; UAX #44 loose matching removes separators.  Numeric Age
+             ;; aliases therefore arrive here as 11 or 151, while the
+             ;; generated table spells the same versions V1_1 and V15_1.
+             (find
+               (concatenate 'string "v" compact)
+               +unicode-age-ranges+
+               :key
+               (lambda (entry)
+                 (remove #\_ (string-downcase (car entry))))
+               :test
+               #'string=))))
     (or
       (cdr direct)
       (multiple-value-bind (major minor) (parse-age-property-value value)

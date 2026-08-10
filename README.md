@@ -30,7 +30,8 @@ greedy and lazy repetition (including
 flags, `.`, and line or absolute anchors. The advanced executor also supports
 backreferences, lookaround, extended grapheme clusters, possessive
 quantifiers, atomic groups, subroutines and recursion, conditionals,
-branch-reset groups, `\K`, `\G`, `\Z`, and PCRE-style control verbs. Advanced
+branch-reset groups, `\K`, `\G`, `\Z`, PCRE-style callouts, and control verbs.
+Advanced
 execution is bounded by `:size-limit` and `:nest-limit`; it does not provide the
 NFA path's linear-time guarantee for arbitrary patterns. See the
 [compatibility guide](https://nerima-lisp.github.io/cl-regex-kit/reference/compatibility/)
@@ -52,11 +53,35 @@ non-overlapping matches, mirroring Rust `Regex::split`/`splitn`. `replace-first`
 `(match-result text)` at each match. Templates use Rust-style `$0`, `$1`,
 `$name`, `${name}`, and `$$`; a backslash is literal text.
 
+`fuzzy-scan` and `fuzzy-search` support bounded insertions, deletions, and
+substitutions for regular NFA regexes. Use `fuzzy-match` or
+`byte-fuzzy-match` for compile-on-demand character or octet-vector matching;
+`match-edit-distance` reports the selected edit count.
+
+For overlapping search, use `all-matches-overlapping`,
+`do-matches-overlapping`, or `do-captures-overlapping`; these operate on a
+complete string or octet-vector value and report zero-width matches at every
+eligible input position. `do-matches` and `do-captures` are callback iteration,
+not chunked streaming matchers. For input that arrives in pieces, use the
+low-latency `make-incremental-regex-stream` API for the ordinary consuming NFA
+subset, or use `make-regex-stream` with `regex-stream-feed` and
+`regex-stream-finish`, or use
+`all-stream-matches`/`scan-stream` with a Common Lisp input stream. Chunks are
+copied into an owned buffer and matching starts at `finish`/EOF so anchors,
+lookaround, and advanced patterns remain correct across boundaries. The
+stream state retains that buffer until `regex-stream-reset` or garbage
+collection; this is a chunked input adapter, not a low-latency bounded-memory
+matcher. The incremental API retains matcher state but not input; callers must
+retain or assemble chunks when they need to resolve result substrings. It
+rejects zero-width, advanced, anchor, lookaround, `\\R`, and byte-Unicode
+patterns; raw byte protocols should use an explicit `(?-u:...)` scope.
+
 `compile-regex-set`/`compile-byte-regex-set` and the `regex-set`/`byte-regex-set`
-macros compile several patterns into one merged NFA for RE2/Rust-style
+macros compile NFA-compatible patterns into one merged NFA for RE2/Rust-style
 multi-pattern matching: `regex-set-matches`, `regex-set-match-p`, and their
-`-at`/`-into` variants report which member patterns matched without
-compiling or scanning each one separately.
+`-at`/`-into` variants report which member patterns matched. Members requiring
+advanced ordered backtracking remain supported, but are evaluated individually;
+a set containing such members does not promise one input scan for every member.
 
 ## Quick Start
 
@@ -123,10 +148,10 @@ input cannot be read.
 ## Documentation
 
 - [Getting started](https://nerima-lisp.github.io/cl-regex-kit/getting-started/)
-- [Core concepts](https://nerima-lisp.github.io/cl-regex-kit/concepts/) --
+- [Core concepts](https://nerima-lisp.github.io/cl-regex-kit/guide/core-concepts/) --
   the parser -> NFA -> Pike's VM pipeline
-- [API reference](https://nerima-lisp.github.io/cl-regex-kit/api-reference/)
-- [Architecture](https://nerima-lisp.github.io/cl-regex-kit/architecture/)
+- [API reference](https://nerima-lisp.github.io/cl-regex-kit/reference/api/)
+- [Architecture](https://nerima-lisp.github.io/cl-regex-kit/reference/architecture/)
 
 ## Architecture and source map
 
