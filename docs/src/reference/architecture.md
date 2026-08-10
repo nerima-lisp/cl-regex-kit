@@ -58,6 +58,9 @@ src/
   api-match.lisp  input validation, timeout handling, scans, and match accessors
   api-operations.lisp
                   non-overlapping iteration and split operations
+  streaming.lisp  chunk-fed buffering adapter and stream-oriented matching helpers
+  incremental-streaming.lisp
+                  bounded-memory incremental NFA matcher for consuming chunks
   api-replace.lisp
                   replacement templates and replacement operations
   regex-set.lisp  multi-pattern compilation and matching
@@ -70,7 +73,7 @@ cli/
 ```
 
 `src/` is flat, per the org's [package
-standard](https://github.com/nerima-lisp/.github/blob/main/PACKAGE_STANDARD.md#リポジトリ直下の構成):
+standard](https://github.com/nerima-lisp/.github/blob/main/PACKAGE_STANDARD.md):
 the `.asd` `:components` list is the table of contents, and every public
 symbol lives in `src/package.lisp`. `cli/` is a second, equally flat
 component tree for the `cl-regex-kit/cli` system (`cl-regex-kit.asd`), which
@@ -79,13 +82,19 @@ builds the `cl-regex-kit-grep` executable rather than a library.
 The API modules follow the execution direction rather than grouping unrelated
 public functions in one file: `api.lisp` creates immutable compiled values,
 `api-match.lisp` executes one match, `api-operations.lisp` consumes the match
-stream for iteration and splitting, and `api-replace.lisp` adds replacement
-template expansion.  This keeps matching independent of higher-level
-operations and makes the ASDF serial order the dependency order.
+stream for iteration and splitting, `streaming.lisp` collects caller-provided
+chunks behind an explicit finish barrier,
+`incremental-streaming.lisp` carries ordinary consuming-NFA state across
+chunks, and `api-replace.lisp` adds replacement template expansion. The two
+streaming modules deliberately expose different contracts: the first preserves
+the full input so every matcher feature remains available, while the second
+bounds input memory by limiting the supported expression subset. This keeps
+matching independent of higher-level operations and makes the ASDF serial order
+the dependency order.
 
 ## Data flow
 
-See [Core concepts](../guide/concepts.md) for the full explanation of each stage. In
+See [Core concepts](../guide/core-concepts.md) for the full explanation of each stage. In
 one line: `parser-syntax.lisp`, `regex-tokenizer*.lisp`,
 `regex-grammar*.lisp`, and `nfa.lisp` are pure compilation (pattern in,
 program out, or a `regex-syntax-error`); `parser-syntax.lisp` owns
@@ -307,8 +316,8 @@ adjacent, which would not preserve it.
   timeout, the treefmt-backed formatting gate, the mkdocs site and its check,
   `apps.test`/`apps.default`, and the dev shell, replacing what this file used
   to hand-write. `cl-weave` reaches the test system through
-  `lispCheckDependencies` (resolved only under `doCheck`, matching
-  `cl-regex-kit.asd`'s dependency-free production system), and the
+  `lispCheckDependencies` (resolved only under `doCheck`; the production
+  system itself depends on `cl-parser-kit` and `cl-concurrent-kit`), and the
   percentage-threshold coverage gate is one `extraOutputs` check built on
   `mkCommandCheck`, since threshold enforcement is domain-specific to this
   project rather than something the generic preset provides.
@@ -326,7 +335,7 @@ adjacent, which would not preserve it.
   as a real command-line tool. `cl-regex-kit/cli` is its own `.asd` system
   (`:depends-on ("cl-regex-kit" "cl-cli")`, `:build-operation "program-op"`)
   so the core `cl-regex-kit` system's dependency list stays exactly
-  `("cl-parser-kit")` -- this is a separate delivery, not a new dependency of
+  `("cl-concurrent-kit" "cl-parser-kit")` -- this is a separate delivery, not a new dependency of
   the library. `flake.nix` builds it with `cl.mkExecutable`, the same
   `packages.<name>` shape `mkPackageFlake` already produces for the library
   itself. Used directly, no adapter: `make-app`/`make-option`/
@@ -336,7 +345,8 @@ adjacent, which would not preserve it.
   library's only "boundary" is `sb-ext:with-timeout` in `call-with-timeout`,
   which is a real-time interrupt mechanism, not a value a fake clock can
   drive. Introducing it would add a runtime dependency to a system whose
-  production code depends on nothing but `cl-parser-kit`, for a boundary
+  production code already depends on `cl-parser-kit` and `cl-concurrent-kit`,
+  for a boundary
   this project does not actually have.
 - **`cl-codec-kit`** -- evaluated and **not adopted**. `utf8-character-at`/
   `utf8-character-before` (`text-boundaries.lisp`) are not a general-purpose
@@ -352,6 +362,7 @@ adjacent, which would not preserve it.
   infrastructure, respectively. `cl-regex-kit` is a pure, deterministic
   computation over strings and octet vectors with no I/O, no subprocesses, and
   no interactive surface outside the separate `cl-regex-kit/cli` system;
-  adopting any of these would be exactly the "変にAdapterを作らず" principle's
-  counter-example -- a dependency bent to a use it wasn't designed for, rather
-  than one that already fits.
+  adopting any of these would be exactly the "avoid adding an adapter merely to
+  force a dependency into the design" principle's counter-example -- a
+  dependency bent to a use it wasn't designed for, rather than one that already
+  fits.

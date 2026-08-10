@@ -7,7 +7,7 @@
 ```nix
 # flake.nix
 inputs.cl-regex-kit = {
-  url = "github:nerima-lisp/cl-regex-kit/v0.1.0";
+  url = "github:nerima-lisp/cl-regex-kit/v0.4.0";
   inputs.nixpkgs.follows = "nixpkgs";
 };
 ```
@@ -23,8 +23,9 @@ Put the repository where ASDF can find it (for example under
 (asdf:load-system "cl-regex-kit")
 ```
 
-There are no runtime dependencies. Only the test system (`cl-regex-kit/test`)
-needs [cl-weave](https://github.com/nerima-lisp/cl-weave).
+The library depends on `cl-parser-kit` and `cl-concurrent-kit` at runtime. The
+test system additionally uses [cl-weave](https://github.com/nerima-lisp/cl-weave)
+and the CLI system requires [cl-cli](https://github.com/nerima-lisp/cl-cli).
 
 ## Quick start
 

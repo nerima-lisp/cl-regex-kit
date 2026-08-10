@@ -3,7 +3,9 @@
 (defstruct match-result start
   end
   groups
-  group-names)
+  group-names
+  mark
+  (edit-distance 0))
 
 (defun slot-count-for-program (program)
   (declare (type simple-vector program))
@@ -12,14 +14,19 @@
           maximize (1+ (inst-a instruction)) into maximum
         finally (return (or maximum 0))))
 
-(defun make-match-result-from-slots (slots slot-count)
+(defun make-match-result-from-slots (slots slot-count &optional mark (edit-distance 0))
   (let ((groups (make-array (/ slot-count 2) :initial-element nil)))
     (dotimes (index (length groups))
       (let ((from (aref slots (* 2 index)))
             (to (aref slots (1+ (* 2 index)))))
         (when (and from to)
           (setf (aref groups index) (cons from to)))))
-    (make-match-result :start (aref slots 0) :end (aref slots 1) :groups groups)))
+    (make-match-result
+     :start (aref slots 0)
+     :end (aref slots 1)
+     :groups groups
+     :mark mark
+     :edit-distance edit-distance)))
 
 (defun run-pike-vm (program text &key (start 0) end shortest-p longest-p never-newline-p)
   "Run PROGRAM against TEXT and return its leftmost-first match, if any.
@@ -88,7 +95,7 @@ position, retaining the usual branch priority to resolve equal-length paths."
                         ((if shortest-p (= (aref slots 0) earliest-start)
                             (not blocking-p))
                           (return-from run-pike-vm (make-match-result-from-slots slots slot-count))))))
-                  ((:char :class :any)
+                  ((:char :class :any :line-break)
                     (multiple-value-bind (next-position matched-p) (instruction-match-end
                         instruction
                         text

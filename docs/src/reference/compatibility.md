@@ -1,10 +1,11 @@
 # Compatibility
 
-`cl-regex-kit` is built on Thompson NFA construction and Pike's VM simulation,
-the same foundation as RE2 and Rust's `regex` crate. That foundation is what
-guarantees matching time linear in the input -- and it is also what rules out
-a few features every backtracking-based engine (Perl, PCRE, Python's `re`)
-supports.
+`cl-regex-kit` has two execution paths. Thompson NFA construction and
+Pike's VM simulation, the same foundation as RE2 and Rust's `regex` crate,
+handle the regular subset with a linear-time guarantee. Patterns that require
+capture-dependent or ordered-backtracking semantics are routed to a bounded
+advanced executor. The advanced path expands compatibility without pretending
+that every pattern still has the NFA path's worst-case bound.
 
 ## Implemented RE2/Rust-style syntax
 
@@ -31,7 +32,11 @@ supports.
   separators: `=`, `:`, and `!=`; `!=` composes with the outer `\\p` or `\\P`
   negation; `\\b`/`\\B` boundaries, Rust-style `\\b{start}`/`\\b{end}`/`\\b{start-half}`/`\\b{end-half}` boundary variants,
   and RE2-style `\\<`/`\\>` word boundaries
-- `\\a`, `\\f`, `\\n`, `\\r`, `\\t`, `\\v`, one- through three-digit `\\ooo`, `\\xHH`, `\\x{...}`, `\\uHHHH`,
+- Extended character escapes: `\\h`/`\\H` for Unicode horizontal whitespace,
+  `\\N` for a non-newline character, `\\R` for a line-break sequence (including
+  CRLF as one consuming unit), and named characters such as
+  `\\N{LATIN CAPITAL LETTER A}`
+- `\\a`, `\\e`, `\\f`, `\\n`, `\\r`, `\\t`, `\\v`, one- through three-digit `\\ooo`, braced octal `\\o{...}`, `\\xHH`, `\\x{...}`, `\\uHHHH`,
   `\\u{...}`, `\\UHHHHHHHH`, and `\\U{...}` escapes (including character classes), plus RE2-style
   `\\Q...\\E` quoted literals
 - `.` and inline `i`, `m`, `s`, `R`, `U`, `x`, and `u` flags, including scoped and disabling
@@ -55,13 +60,72 @@ supports.
   `split-inclusive`, and `split-n`, and
   first, bounded, and all replacement through `replace-first`, `replace-n`,
   and `replace-all`, with Rust-style capture templates (`$0`, `$name`,
-  `${name}`, and `$$`) by default, and cl-ppcre-style templates (`\1`, `\&`,
-  `\{name}`, and `\\`) through `:template-syntax :backslash`
+  `${name}`, and `$$`)
+- Explicit overlapping traversal through `all-matches-overlapping`,
+  `do-matches-overlapping`, and `do-captures-overlapping`; these restart one
+  input unit after each match start and report zero-width matches at every
+  eligible input position. The ordinary traversal, split, and replacement
+  APIs remain non-overlapping.
+- `do-matches` and `do-captures` are callback iteration over a complete input
+  value. For chunk-oriented callers, `make-regex-stream` accepts string or
+  octet chunks and preserves the complete input until `regex-stream-finish`
+  (or the `all-stream-*`/`scan-stream` helpers) runs the ordinary matcher.
+  This is a stateful buffering adapter, not a low-latency or bounded-memory
+  incremental VM; arbitrary lookaround, backreferences, and end anchors still
+  require the finish barrier.
 - RE2/Rust-style multi-pattern matching through `compile-regex-set`,
   `regex-set-count`, `regex-set-empty-p`, `regex-set-matches`,
   `regex-set-matches-at`, `regex-set-matches-into`, `regex-set-match-p`, and
   `regex-set-match-at-p`; duplicate patterns retain their individual source
   indexes
+
+## Bounded fuzzy matching
+
+`fuzzy-scan`, `fuzzy-search`, and their `-at` forms provide bounded
+Levenshtein-style insertions, deletions, and substitutions for regular NFA
+regexes. `fuzzy-match` and `byte-fuzzy-match` are compile-on-demand helpers;
+`match-edit-distance` reports the selected distance. `max-edits` controls the
+edit bound and `state-limit` controls the fuzzy search budget. Advanced
+ordered-backtracking regexes are rejected with `fuzzy-match-unsupported`
+rather than being assigned a different fuzzy meaning.
+
+## Advanced ordered-backtracking syntax
+
+The advanced executor handles constructs that cannot be represented by the
+regular NFA alone:
+
+- Numeric and named backreferences, including `\g{n}`, `\k<name>`,
+  and quoted subroutine names with `\g'name'`
+- Positive and negative lookahead and lookbehind, including fixed- and
+  variable-length lookbehind
+- Extended grapheme clusters (`\X`), possessive quantifiers, and atomic
+  groups
+- Subroutine calls and recursion: `(?R)`, `(?&name)`,
+  `(?P>name)`, relative calls, and recursion conditions
+- DEFINE blocks, capture conditions, and branch-reset groups
+  (`(?|...)`)
+- .NET-style balancing groups, including `(?<name>...)` capture pushes and
+  `(?<-name>...)` history pops. They are advanced-path only; capture history is
+  private to the executor, while the public match result exposes the current
+  top capture value.
+- Match-position and end-of-input controls: `\K`, `\G`, and
+  `\Z`
+- PCRE-style control verbs: `(*FAIL)`, `(*SKIP)`,
+  `(*PRUNE)`, `(*COMMIT)`, `(*THEN)`,
+  `(*ACCEPT)`, and `(*MARK:tag)`, including their short
+  aliases where defined by the parser
+- PCRE2-style callouts: `(?C)`, `(?Cn)`, `(?C"tag")`, `(?C'tag')`,
+  `(?C^tag^)`, `(?C%tag%)`, `(?C#tag#)`, `(?C$tag$)`, and `(?C{tag})` are zero-width
+  advanced nodes. A compiled expression accepts `:callout`, called as
+  `(number tag position text)`, returning `NIL` or `:continue` to continue
+  or `:fail` to reject the current path. Without a callback, callouts are
+  no-ops.
+
+The advanced executor honors `:size-limit` as a maximum evaluation-step
+budget and `:nest-limit` as the recursion-depth limit. The public
+`run-advanced-regex` entry point accepts the same `:timeout` keyword as the
+other matching APIs. These limits are resource safeguards, not a claim of
+linear-time matching for arbitrary backtracking patterns.
 
 ## Compilation options
 
@@ -86,88 +150,55 @@ inside their group. For
 example, `:case-insensitive t` makes the whole expression case-insensitive,
 while `(?-i:...)` restores case-sensitive matching for the nested expression.
 
-`:size-limit` bounds the emitted NFA instruction count and defaults to
-100000. For `compile-regex-set`, it also bounds the final merged NFA,
-including its set-dispatch instructions. `:nest-limit` bounds nested group
-depth and defaults to 250.
-Exceeding either limit signals `regex-syntax-error` before the engine attempts
-matching. `:size-limit` is a program-size limit, not Rust `regex`'s
-byte-oriented `RegexBuilder::size_limit`.
+For NFA-compatible patterns, `:size-limit` bounds the emitted NFA instruction
+count and defaults to 100000. For `compile-regex-set`, it also bounds the final
+merged NFA, including its set-dispatch instructions. `:nest-limit` bounds
+nested group depth and defaults to 250. Exceeding either limit on this path
+signals `regex-syntax-error` before matching. `:size-limit` is a program-size
+limit, not Rust `regex`'s byte-oriented `RegexBuilder::size_limit`.
+
+For advanced patterns, the AST is retained instead of emitting an NFA:
+`:size-limit` becomes the maximum evaluation-step budget, while `:nest-limit`
+still limits parser nesting and also guards advanced execution depth. Runtime
+exhaustion signals `advanced-regex-limit-error`.
 
 `:octal` defaults to `t` for RE2/Rust-compatible one- through three-digit
 `\\ooo` escapes. Values outside the byte range are rejected. Set it to `nil`
 to reject those escapes, matching Rust `RegexBuilder`'s default behavior.
 
-Every matching entry point accepts `:timeout`, a positive number of seconds.
-On expiry it signals `regex-timeout`; the default `nil` imposes no deadline.
-This uses SBCL's timeout facility and shares the project's SBCL-only
-portability boundary.
+Complete-input matching entry points accept `:timeout`, a positive number of
+seconds. The chunked state constructor and stream helpers accept the same
+keyword; it covers matching and stream callbacks, and is applied around the
+adapter's input-read loop. A blocking read supplied by an external or foreign
+stream may not be interruptible, so a hard I/O deadline requires an input stream
+that provides its own bounded/non-blocking behavior.
+`regex-stream-finish` uses the timeout stored by `make-regex-stream` and does
+not accept a separate timeout keyword. On expiry the API signals
+`regex-timeout`; the default `nil` imposes no deadline. This uses SBCL's
+timeout facility and shares the project's SBCL-only portability boundary.
 
-## Not supported, by design
+## Outside current dialect
 
-### Backreferences (`\1`, `\2`, ...)
-
-Matching `\1` requires comparing the input against text captured *at match
-time* -- a context-sensitive requirement that a finite automaton cannot
-express. Supporting it means falling back to backtracking for the whole
-pattern, which reintroduces the exponential worst case this engine exists to
-avoid.
-
-This restriction is about backreferences *in a pattern*. It says nothing
-about `\1` in a *replacement template*, which is an ordinary
-substitution and costs the engine nothing; see
-[replacement templates](#replacement-templates) below.
-
-Note that `\1` in a pattern is not rejected: with the default `:octal t`, it
-parses as the octal escape for U+0001. A caller that accepts patterns
-written for a backreference-supporting engine should pass `:octal nil`, which
-makes `\1` through `\7` signal `regex-syntax-error` instead of silently
-matching a control character. `\8` and `\9` always signal, since no octal
-reading exists for them.
-
-### Lookaround
-
-Lookahead and lookbehind are not part of the supported RE2/Rust-compatible
-syntax. Supporting them would require a distinct matching strategy and would
-complicate the engine's resource guarantees.
+The advanced path deliberately stops short of embedding another language or
+running arbitrary pattern code. Perl code interpolation and control verbs not
+listed above are outside the current dialect. Fuzzy matching is available for
+the regular NFA subset only; it rejects advanced patterns rather than
+silently compiling them with different meaning.
 
 ## Why this trade
 
-RE2's own documentation states this trade explicitly, and this project makes
-the same choice: a smaller, well-defined feature set in exchange for a
-worst-case time guarantee that holds for *any* input, including adversarial
-ones. An application that must accept untrusted patterns or untrusted input
-text benefits from this guarantee in a way that a backtracking engine,
-however featureful, cannot provide.
-
-If a project needs backreferences or lookaround, a backtracking
-engine such as [cl-ppcre](https://edicl.github.io/cl-ppcre/) is the
-appropriate tool -- and not a defect in either design, just a different point
-on the same trade-off.
+The regular NFA path preserves the RE2/Rust guarantee for applications that
+need predictable behavior on untrusted patterns or input. The advanced path is
+available when compatibility with capture-dependent and ordered-backtracking
+syntax is more important than that guarantee. Use `:size-limit`,
+`:nest-limit`, and `:timeout` when advanced patterns are
+supplied by untrusted sources.
 
 ## Replacement templates
 
-Replacement templates are independent of the matching engine, so this is one
-place where cl-ppcre compatibility *is* available. `replace-first`,
-`replace-n`, and `replace-all` take a `:template-syntax` argument:
-
-- `:dollar` (the default) is the Rust-style dialect: `$1`, `$name`,
-  `${name}`, `$$`.
-- `:backslash` is the cl-ppcre-style dialect: `\1`, `\&`, `\{name}`, `\\`.
-
-The default has not changed and will not change; `:backslash` is opt-in per
-call. This matters for a caller that exposes replacement templates to *its*
-own users -- a `.tmux.conf` `#{s/pattern/replacement/}` modifier, say -- where
-the users have written `\1` and expect it to mean the first capture. Under
-`:dollar` such a template is emitted verbatim with no error, which is why the
-dialect is a deliberate choice at the call site rather than a guess made from
-the template's contents.
-
-`:backslash` reproduces `cl-ppcre:regex-replace-all` for every template
-cl-ppcre accepts. It additionally accepts `\0`, out-of-range group numbers,
-and `\{name}`, all of which cl-ppcre rejects; it does not implement
-cl-ppcre's `` \` `` and `\'` prematch/postmatch aliases. The
-[API reference](api.md) tabulates each case.
+`replace-first`, `replace-n`, and `replace-all` use one Rust-style template
+syntax: `$0`, `$1`, `$name`, `${name}`, and `$$`. Backslashes are literal
+characters, so `\1` is not a capture reference.
 
 ## Current differences
 
@@ -212,7 +243,7 @@ alias `Age=v151` are supported. Age uses the same static Unicode 16 range data a
   inside non-Unicode scopes. This supports Rust's mixed Unicode/non-Unicode
   `bytes::Regex` matching model. Direct non-ASCII literals and Unicode escapes
   (`\\x{...}`, `\\u...`, `\\U...`) in a non-Unicode scope encode to UTF-8, while
-  `\\xHH` and octal escapes retain exact-octet semantics; non-ASCII
+  `\\xHH`, octal, and braced-octal escapes retain exact-octet semantics; non-ASCII
   character-class literals and Unicode escapes that resolve to non-ASCII
   scalars are rejected there.
   `replace-first`, `replace-n`, and `replace-all` accept
@@ -221,12 +252,18 @@ alias `Age=v151` are supported. Age uses the same static Unicode 16 range data a
   forms.
   Character `Regex` values preserve Rust's UTF-8 invariant: raw scopes that
   could match invalid UTF-8 bytes are rejected at compilation. Use
-  `compile-byte-regex` when raw octet matching is required.
+  `compile-byte-regex` when raw octet matching is required. Character-domain
+  APIs also reject Common Lisp strings containing surrogate code points (or
+  other non-scalar character values) in the selected input range with a
+  `type-error`; source patterns containing them signal `regex-syntax-error`.
 - To retain predictable compilation resources, a compiled NFA program is
   limited to 100000 instructions. Patterns exceeding this limit signal
   `regex-syntax-error` rather than allocating without bound.
-- `regex-set` merges member NFAs and scans the input once. Its Pike VM uses
-  work bounded by the product of text length and total member-program size;
-  this is not a DFA-based RE2 `Set` implementation.
+- `regex-set` merges NFA-compatible member programs and scans the input once.
+  Members requiring advanced ordered backtracking are retained separately and
+  evaluated individually, so a set containing them does not promise one scan
+  for every member. The merged Pike VM uses work bounded by the product of text
+  length and total member-program size; this is not a DFA-based RE2 `Set`
+  implementation.
 
 See the [Roadmap](../project/roadmap.md) for planned extensions.

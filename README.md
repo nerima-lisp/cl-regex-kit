@@ -8,14 +8,16 @@
 Thompson NFA construction and Pike's VM -- the architecture behind RE2 and
 Rust's `regex` crate -- so, for a fixed compiled program, matching stays linear
 in the input length instead of risking the catastrophic backtracking of a naive
-engine. Backreferences and
-lookaround are an explicit non-goal: they cannot be expressed by a
-finite automaton without giving up that guarantee.
+engine. Patterns that fit the finite-automaton model retain that path's
+linear-time behavior. Patterns that require capture-dependent or
+ordered-backtracking semantics use a separate bounded advanced executor
+instead of being silently compiled with different semantics.
 
 Full documentation is published at <https://nerima-lisp.github.io/cl-regex-kit/>.
 The source for that site lives in [docs/src/](docs/src/).
 
-**Status:** the parser, NFA compiler, and Pike's VM matcher are implemented.
+**Status:** the parser, NFA compiler, Pike's VM matcher, and advanced
+ordered-backtracking executor are implemented.
 Supported syntax includes literals, alternation, capturing and non-capturing
 groups, named captures, reusable capture-location buffers, literal escaping,
 greedy and lazy repetition (including
@@ -25,10 +27,15 @@ greedy and lazy repetition (including
   Sentence_Break properties, ASCII POSIX classes, and class
   intersection/difference/symmetric-difference,
   inline `i`/`m`/`s`/`R`/`U`/`x`/`u`
-flags, `.`, and line or absolute anchors. Backreferences and lookaround remain
-intentionally unsupported. See the
-[Roadmap](https://nerima-lisp.github.io/cl-regex-kit/roadmap/) for the full
-scope and deliberate non-goals.
+flags, `.`, and line or absolute anchors. The advanced executor also supports
+backreferences, lookaround, extended grapheme clusters, possessive
+quantifiers, atomic groups, subroutines and recursion, conditionals,
+branch-reset groups, `\K`, `\G`, `\Z`, PCRE-style callouts, and control verbs.
+Advanced
+execution is bounded by `:size-limit` and `:nest-limit`; it does not provide the
+NFA path's linear-time guarantee for arbitrary patterns. See the
+[compatibility guide](https://nerima-lisp.github.io/cl-regex-kit/reference/compatibility/)
+for the exact syntax and execution boundary.
 
 Byte-oriented input is available through `compile-byte-regex` and the
 `byte-regex` macro. These patterns match `(array (unsigned-byte 8) (*))`
@@ -43,16 +50,38 @@ Unicode escapes that resolve to non-ASCII scalars.
 `split`, `split-terminator`, `split-inclusive`, and `split-n` split text on
 non-overlapping matches, mirroring Rust `Regex::split`/`splitn`. `replace-first`,
 `replace-n`, and `replace-all` substitute a template string or a function of
-`(match-result text)` at each match; `:template-syntax` selects between the
-default `:dollar` (Rust-style `$1`/`${name}`/`$$`) and `:backslash`
-(`cl-ppcre`-compatible `\1`/`\{name}`/`\&`/`\\`, for callers migrating from
-`cl-ppcre:regex-replace-all` or exposing templates to their own users).
+`(match-result text)` at each match. Templates use Rust-style `$0`, `$1`,
+`$name`, `${name}`, and `$$`; a backslash is literal text.
+
+`fuzzy-scan` and `fuzzy-search` support bounded insertions, deletions, and
+substitutions for regular NFA regexes. Use `fuzzy-match` or
+`byte-fuzzy-match` for compile-on-demand character or octet-vector matching;
+`match-edit-distance` reports the selected edit count.
+
+For overlapping search, use `all-matches-overlapping`,
+`do-matches-overlapping`, or `do-captures-overlapping`; these operate on a
+complete string or octet-vector value and report zero-width matches at every
+eligible input position. `do-matches` and `do-captures` are callback iteration,
+not chunked streaming matchers. For input that arrives in pieces, use the
+low-latency `make-incremental-regex-stream` API for the ordinary consuming NFA
+subset, or use `make-regex-stream` with `regex-stream-feed` and
+`regex-stream-finish`, or use
+`all-stream-matches`/`scan-stream` with a Common Lisp input stream. Chunks are
+copied into an owned buffer and matching starts at `finish`/EOF so anchors,
+lookaround, and advanced patterns remain correct across boundaries. The
+stream state retains that buffer until `regex-stream-reset` or garbage
+collection; this is a chunked input adapter, not a low-latency bounded-memory
+matcher. The incremental API retains matcher state but not input; callers must
+retain or assemble chunks when they need to resolve result substrings. It
+rejects zero-width, advanced, anchor, lookaround, `\\R`, and byte-Unicode
+patterns; raw byte protocols should use an explicit `(?-u:...)` scope.
 
 `compile-regex-set`/`compile-byte-regex-set` and the `regex-set`/`byte-regex-set`
-macros compile several patterns into one merged NFA for RE2/Rust-style
+macros compile NFA-compatible patterns into one merged NFA for RE2/Rust-style
 multi-pattern matching: `regex-set-matches`, `regex-set-match-p`, and their
-`-at`/`-into` variants report which member patterns matched without
-compiling or scanning each one separately.
+`-at`/`-into` variants report which member patterns matched. Members requiring
+advanced ordered backtracking remain supported, but are evaluated individually;
+a set containing such members does not promise one input scan for every member.
 
 ## Quick Start
 
@@ -74,7 +103,7 @@ compiling or scanning each one separately.
 ```nix
 # flake.nix
 inputs.cl-regex-kit = {
-  url = "github:nerima-lisp/cl-regex-kit/v0.2.0";
+  url = "github:nerima-lisp/cl-regex-kit/v0.4.0";
   inputs.nixpkgs.follows = "nixpkgs";
 };
 ```
@@ -87,9 +116,10 @@ the ASDF system.
 
 Without Nix, put the repository where ASDF can find it and evaluate
 `(asdf:load-system "cl-regex-kit")`. The library depends on
-[`cl-parser-kit`](https://github.com/nerima-lisp/cl-parser-kit); the test system
-also needs [`cl-weave`](https://github.com/nerima-lisp/cl-weave), and the
-optional command-line system needs
+[`cl-parser-kit`](https://github.com/nerima-lisp/cl-parser-kit) and
+[`cl-concurrent-kit`](https://github.com/nerima-lisp/cl-concurrent-kit); the
+test system also needs [`cl-weave`](https://github.com/nerima-lisp/cl-weave),
+and the optional command-line system needs
 [`cl-cli`](https://github.com/nerima-lisp/cl-cli).
 
 ## Command Line
@@ -118,10 +148,10 @@ input cannot be read.
 ## Documentation
 
 - [Getting started](https://nerima-lisp.github.io/cl-regex-kit/getting-started/)
-- [Core concepts](https://nerima-lisp.github.io/cl-regex-kit/concepts/) --
+- [Core concepts](https://nerima-lisp.github.io/cl-regex-kit/guide/core-concepts/) --
   the parser -> NFA -> Pike's VM pipeline
-- [API reference](https://nerima-lisp.github.io/cl-regex-kit/api-reference/)
-- [Architecture](https://nerima-lisp.github.io/cl-regex-kit/architecture/)
+- [API reference](https://nerima-lisp.github.io/cl-regex-kit/reference/api/)
+- [Architecture](https://nerima-lisp.github.io/cl-regex-kit/reference/architecture/)
 
 ## Architecture and source map
 
@@ -155,27 +185,31 @@ domain. Validate SBCL upgrades with the full test suite.
 
 ## Development
 
-The flake currently exposes Linux (`x86_64-linux`) outputs. Run these commands
-on Linux or with a configured Linux builder; a successful `nix flake check` on
-another host does not execute those checks.
+The flake exposes `x86_64-linux` and `aarch64-darwin` outputs. CI gates only
+the `x86_64-linux` checks; `aarch64-darwin` is the development platform and is
+not part of the CI gate.
 
 ```sh
 nix develop          # SBCL with CL_SOURCE_REGISTRY already set
 nix build            # -> ./result/bin/cl-regex-kit-grep
 nix run .#test       # run the test suite
 nix run .#benchmark  # run the benchmark suite with configurable defaults
-nix run .#coverage   # write an HTML coverage report to ./coverage/
+nix develop --command env CL_REGEX_KIT_COVERAGE_DIRECTORY="$PWD/coverage" \
+  sbcl --script run-coverage.lisp  # write an HTML coverage report locally
 nix flake check      # tests + benchmark + formatting + docs, the CI gate
 nix fmt              # format Nix sources (treefmt)
 ```
 
 Tests live in `t/` and run under [cl-weave](https://github.com/nerima-lisp/cl-weave),
-the org's test framework; `sbcl --script run-tests.lisp` runs them without Nix.
+the org's test framework. `nix run .#test` provides the required dependencies;
+direct `sbcl --script run-tests.lisp` also requires ASDF to resolve
+`cl-parser-kit`, `cl-concurrent-kit`, `cl-weave`, and `cl-cli`.
 The suite combines focused examples with shrinkable property tests and bounded
 parser fuzzing, so failures retain a minimal reproducible input.
-`nix run .#coverage` recompiles the production sources with SBCL's `sb-cover`,
-then writes `cover-index.html`. The Nix coverage check generates the same
-artifacts and gates at 96% expression / 92% branch coverage across the
+`nix flake check -L` recompiles the production sources with SBCL's `sb-cover`
+as its coverage check and validates the generated report. The local command
+above writes `cover-index.html` and the per-file reports to `./coverage/`.
+That check gates at 96% expression / 92% branch coverage across the
 handwritten production sources, so a real regression in test reachability
 cannot slip through; see [roadmap.md](docs/src/project/roadmap.md#known-gaps)
 for why the gate sits below 100%.

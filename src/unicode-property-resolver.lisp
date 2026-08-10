@@ -164,27 +164,41 @@
   (let* ((raw-name (string-upcase name))
          (raw-property (normalized-property-name raw-name))
          (property
-           (or (property-value raw-property (list "GC=" "GENERALCATEGORY="))
-               raw-property))
+           (or (property-value-loose raw-property
+                                     (list "GC=" "GENERALCATEGORY="))
+               ;; UAX #44 reserves the bare ISC spelling for the
+               ;; string-valued Iso_Comment property.  This implementation
+               ;; does not expose string-valued properties, so preserve this
+               ;; ambiguous bare form instead of mapping it to category C.
+               (if (string= raw-property "ISC")
+                   raw-property
+                   (normalized-property-value-name raw-property))))
          (script
            (canonical-script-name
-             (property-value raw-property (list "SC=" "SCRIPT="))))
+             (property-value-loose raw-property (list "SC=" "SCRIPT="))))
          (script-extension
            (canonical-script-name
-             (property-value raw-property (list "SCX=" "SCRIPTEXTENSIONS="))))
+             (property-value-loose
+               raw-property (list "SCX=" "SCRIPTEXTENSIONS="))))
+         (bare-script
+           (cdr (assoc property
+                       +unicode-script-aliases+
+                       :test (function string=))))
          (block (known-block-property-name raw-property))
-         (age (property-value raw-name (list "AGE=")))
+         (age (property-value-loose raw-property (list "AGE=")))
          (grapheme-break
            (canonical-segmentation-property-value
-             (property-value raw-property (list "GCB=" "GRAPHEMECLUSTERBREAK="))
+             (property-value-loose
+               raw-property (list "GCB=" "GRAPHEMECLUSTERBREAK="))
              +unicode-grapheme-cluster-break-value-aliases+))
          (word-break
            (canonical-segmentation-property-value
-             (property-value raw-property (list "WB=" "WORDBREAK="))
+             (property-value-loose raw-property (list "WB=" "WORDBREAK="))
              +unicode-word-break-value-aliases+))
          (sentence-break
            (canonical-segmentation-property-value
-             (property-value raw-property (list "SB=" "SENTENCEBREAK="))
+             (property-value-loose
+               raw-property (list "SB=" "SENTENCEBREAK="))
              +unicode-sentence-break-value-aliases+))
          (predicate
            (cdr (assoc property +unicode-property-predicates+ :test (function string=))))
@@ -217,6 +231,8 @@
                                     :test (function string=)))))))))
       (script
        (unicode-runtime-property-descriptor :script :script script))
+      (bare-script
+       (unicode-runtime-property-descriptor :script :script bare-script))
       (block
        (unicode-runtime-property-descriptor :block :block block))
       (age
