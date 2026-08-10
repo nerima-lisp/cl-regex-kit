@@ -1,29 +1,55 @@
 # Core concepts
 
-`cl-regex-kit` compiles a pattern in three stages, mirroring the design Russell
-Cox documents in
-["Regular Expression Matching Can Be Simple and Fast"](https://swtch.com/~rsc/regexp/regexp1.html)
-and its sequels, and the one RE2 and Rust's `regex` crate ship in production.
+`cl-regex-kit` compiles a pattern in three stages, following the Thompson
+NFA and Pike VM design that RE2 and Rust's `regex` crate also ship in
+production.
 
-```text
-pattern string --[regex-tokenizer.lisp]--> token vector --[regex-grammar.lisp]--> REGEX-NODE tree --[nfa.lisp]--> INST program --[pike-vm-*.lisp]--> MATCH-RESULT
+A pattern string becomes a token vector (`regex-tokenizer.lisp`), which becomes
+a `regex-node` tree (`regex-grammar.lisp`, `regex-grammar-support.lisp`, and
+`regex-grammar-classes.lisp`). From there the path forks. A
+regular pattern is compiled to a flat instruction program (`nfa.lisp`) and run
+by the Pike VM (`pike-vm-*.lisp`). A pattern using advanced constructs keeps
+its tree and is run by the bounded AST executor (`advanced-match.lisp`) instead.
+Both paths produce the same `match-result`.
+
+```mermaid
+flowchart TD
+    P["pattern string"] --> T["token vector"]
+    T --> A["regex-node tree"]
+    A -->|regular| N["INST program"]
+    A -->|advanced| X["bounded AST executor"]
+    N --> M["match-result"]
+    X --> M
 ```
 
-## 1. Parsing (`src/regex-tokenizer.lisp`, `src/regex-grammar.lisp`, `src/ast.lisp`)
+## 1. Parsing (`src/regex-tokenizer.lisp`, `src/regex-grammar.lisp`, `src/regex-grammar-support.lisp`, `src/regex-grammar-classes.lisp`, `src/ast.lisp`)
 
 `parse-regex` first tokenizes the pattern into a `(vector cl-parser-kit:token)`
-(`regex-tokenizer.lisp`), then runs a recursive-descent parser over that token
-vector (`regex-grammar.lisp`/`regex-grammar-classes.lisp`): alternation over
-concatenations, concatenation over repeated atoms, an atom is a literal, a
-group, a character class, `.`, or an anchor. It produces a tree of
-`regex-node` subclasses (`ast.lisp`) -- one class per syntax feature, with no
-separate "optimized" tree, since the next stage compiles this shape directly.
+(`regex-tokenizer.lisp`), then runs a hand-written recursive-descent parser
+over that token vector (`regex-grammar.lisp`, with `regex-grammar-support.lisp`
+and `regex-grammar-classes.lisp` supplying shared helpers and character-class
+bodies):
+alternation over concatenations, concatenation over repeated atoms, and an
+atom is a literal, a group, a character class, `.`, an anchor, or one of the
+advanced constructs such as a backreference or a lookaround. Every branch
+point resolves on one token of lookahead, which is why this tier stays
+recursive descent rather than a combinator pipeline; what `cl-parser-kit`
+contributes is its token/span model and the tokenizer built on it.
+
+The result is a tree of `regex-node` subclasses (`ast.lisp`) -- one class per
+syntax feature, with no separate "optimized" tree, since the next stage
+compiles this shape directly.
 
 ## 2. Thompson construction (`src/nfa.lisp`)
 
 `compile-to-nfa` walks the AST and emits a flat program: a vector of `inst`
-values (`:char`, `:class`, `:any`, `:split`, `:jmp`, `:save`, `:match`). This is
-Thompson's construction -- each node type expands to a small, fixed sequence of
+values. The consuming and control opcodes are `:char`, `:class`, `:any`,
+`:line-break`, `:split`, `:jmp`, `:save`, and `:match`; each anchor kind
+compiles to an opcode of its own (`:bol`, `:eol`, `:bos`, `:eos`,
+`:boundary`, `:non-boundary`, `:word-start`, `:word-end`, and the two
+half-boundary variants), so the VM tests an assertion by dispatching on the
+instruction rather than by re-examining the AST. This is Thompson's
+construction -- each node type expands to a small, fixed sequence of
 instructions with epsilon-like control flow (`:split`, `:jmp`), so program size
 stays linear in pattern size.
 
@@ -61,7 +87,7 @@ match leftmost-first, greedy semantics -- so the recorded slots are always
 consistent with what a backtracking engine would have found by exploring in
 priority order.
 
-## Why this instead of backtracking
+## Comparison with backtracking
 
 A textbook backtracking engine (and most engines you meet day to day: Perl,
 PCRE, Python's `re`) explores one path at a time and retries on failure. On
@@ -74,5 +100,13 @@ The trade is an execution boundary: [backreferences, lookaround, and other
 advanced constructs](../reference/compatibility.md) require runtime state
 that a finite automaton cannot represent without giving up the linear-time
 guarantee. `cl-regex-kit` keeps that guarantee for the regular path and routes
-these constructs to a separate bounded executor; advanced matches are subject
-to `:size-limit` and `:nest-limit` instead of the regular path's guarantee.
+these constructs to a separate bounded executor
+(`src/advanced-match.lisp`), which evaluates the AST directly with ordered
+backtracking and bounded search. Such a pattern never reaches
+`compile-to-nfa` at all -- it keeps its AST instead of gaining a program, and
+`regex-advanced-p` reports which path a compiled regex took.
+
+Advanced matches are bounded by the compile-time `:size-limit` and
+`:nest-limit` rather than by the regular path's guarantee. Exhausting either
+signals [`advanced-regex-limit-error`](../reference/conditions.md), so an
+adversarial pattern fails loudly instead of running away.

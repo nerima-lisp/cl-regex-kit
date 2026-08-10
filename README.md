@@ -103,7 +103,7 @@ a set containing such members does not promise one input scan for every member.
 ```nix
 # flake.nix
 inputs.cl-regex-kit = {
-  url = "github:nerima-lisp/cl-regex-kit/v0.4.0";
+  url = "github:nerima-lisp/cl-regex-kit/v1.0.0";
   inputs.nixpkgs.follows = "nixpkgs";
 };
 ```
@@ -196,7 +196,6 @@ not part of the CI gate.
 nix develop          # SBCL with CL_SOURCE_REGISTRY already set
 nix build            # -> ./result/bin/cl-regex-kit-grep
 nix run .#test       # run the test suite
-nix run .#benchmark  # run the benchmark suite with configurable defaults
 nix develop --command env CL_REGEX_KIT_COVERAGE_DIRECTORY="$PWD/coverage" \
   sbcl --script run-coverage.lisp  # write an HTML coverage report locally
 nix flake check      # tests + benchmark + formatting + docs, the CI gate
@@ -214,7 +213,7 @@ as its coverage check and validates the generated report. The local command
 above writes `cover-index.html` and the per-file reports to `./coverage/`.
 That check gates at 96% expression / 92% branch coverage across the
 handwritten production sources, so a real regression in test reachability
-cannot slip through; see [roadmap.md](docs/src/project/roadmap.md#known-gaps)
+cannot slip through; see [the roadmap](https://nerima-lisp.github.io/cl-regex-kit/project/roadmap/#known-gaps)
 for why the gate sits below 100%.
 
 ## Benchmarks
@@ -253,13 +252,14 @@ nix run .#benchmark
 `nix flake check` also runs a bounded benchmark smoke check with 100 match
 iterations, 10 compile iterations, 10 warm-up iterations, one sample, seed
 1729, revision label `nix-check`, and a 120-second external timeout. Each
-compile or match operation also has a one-second timeout. The seed makes
-generated input repeatable and the suite keeps workload order fixed. Each
-result includes the raw samples plus median, minimum, and maximum elapsed time
-and allocation count. The report itself is not deterministic: timings,
-allocation counts, runtime metadata, and host metadata can vary under natural
-garbage collection. Treat it as a diagnostic baseline for repeated runs in the
-same controlled environment, not as evidence of speed superiority or a valid
+compile or match operation runs under a per-operation timeout recorded in the
+report metadata as `:per-operation-timeout-seconds`. The seed makes generated
+input repeatable and the suite keeps workload order fixed. Each result
+includes the raw samples plus median, minimum, and maximum elapsed time and
+bytes consed. The report itself is not deterministic: timings, allocation
+figures, runtime metadata, and host metadata can vary under natural garbage
+collection. Treat it as a diagnostic baseline for repeated runs in the same
+controlled environment, not as evidence of speed superiority or a valid
 cross-machine comparison.
 
 ## Contributing

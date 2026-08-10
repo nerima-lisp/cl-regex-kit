@@ -22,7 +22,6 @@
    #:capture-locations #:capture-locations-p
    #:regex-capture-locations #:capture-locations-count
    #:capture-location-start #:capture-location-end #:scan-captures-into #:scan-captures-into-at
-   #:run-advanced-regex
    #:regex #:byte-regex
    #:regex-p #:byte-regex-p #:regex-group-count #:regex-capture-count #:regex-static-capture-count
    #:regex-capture-names #:regex-group-index #:regex-source

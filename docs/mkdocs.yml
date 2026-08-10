@@ -4,12 +4,25 @@ site_url: https://nerima-lisp.github.io/cl-regex-kit/
 repo_url: https://github.com/nerima-lisp/cl-regex-kit
 repo_name: nerima-lisp/cl-regex-kit
 edit_uri: edit/main/docs/src/
+copyright: MIT
 
 docs_dir: src
+
+# Only for a local `mkdocs build`, which otherwise writes ./site inside docs/.
+# The Nix docs builder passes --site-dir "$out" on the command line, which
+# overrides this, so the packaged build is unaffected. .gitignore's /site/
+# entry is what keeps a local build out of the working tree.
 site_dir: ../site
+
+# Required by DOCS_STANDARD.md, and load-bearing: under directory URLs each
+# page sits at its own depth, so only relative links resolve -- which is what
+# makes --strict able to verify them.
 use_directory_urls: true
+
+# Also passed as --strict by packages.docs. Writing it here as well means
+# `mkdocs serve` applies the same gate, so no invocation path silently
+# tolerates a broken link. Use `mkdocs serve --no-strict` while editing.
 strict: true
-copyright: MIT
 
 theme:
   name: material
@@ -50,6 +63,8 @@ theme:
 plugins:
   - search
 
+# Fixed by DOCS_STANDARD.md; keep this list and its order in sync with it
+# rather than adding or dropping entries per repository.
 markdown_extensions:
   - admonition
   - pymdownx.details
@@ -67,6 +82,10 @@ markdown_extensions:
       alternate_style: true
   - pymdownx.tasklist:
       custom_checkbox: true
+  # These two rewrite bare prose: smartsymbols folds sequences like (c) and
+  # +/-, keys claims ++...++ spans. In a regex library's pages those sequences
+  # are subject matter, so keep pattern syntax inside code spans, where neither
+  # extension reaches it.
   - pymdownx.keys
   - pymdownx.smartsymbols
   - attr_list
@@ -78,6 +97,11 @@ markdown_extensions:
       permalink: true
       title: On this page
 
+# Every page under docs/src/ must appear here: --strict fails the build on an
+# unlisted page. docs/src/ is split into guide/ reference/ project/, with only
+# index.md, getting-started.md and assets/ at the root, per the 2026-08-01
+# revision of DOCS_STANDARD.md. assets/ holds no pages and needs no entry.
+# Five sections in this fixed order, labelled in title case; do not add a sixth.
 nav:
   - Home: index.md
   - Getting Started: getting-started.md
