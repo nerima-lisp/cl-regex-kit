@@ -571,6 +571,16 @@ Rust `Regex::captures_at`.
 Rust `Regex::find_at`. It has the same leftmost-first result and range
 semantics as `scan`.
 
+### `regex-search` and `regex-search-at`
+
+```lisp
+(regex-search regex text &key (start 0) end timeout) => match-result-or-nil
+(regex-search-at regex text start &key end timeout) => match-result-or-nil
+```
+
+Search-terminology aliases for `scan` and `scan-at`, provided for callers who
+prefer "search" vocabulary. Selection and range semantics are identical.
+
 ### `full-match` and `full-match-p`
 
 ```lisp
@@ -636,6 +646,32 @@ or `timeout` is out of range), `regex-timeout` (`timeout` elapses).
 
 See also: [`match`](api.md#match), [`compile-byte-regex`](api.md#compile-byte-regex), [`byte-regex-p`](api.md#byte-regex-p)
 
+### `run-advanced-regex`
+
+```lisp
+(cl-regex-kit:run-advanced-regex regex text
+                                 &key (start 0) end shortest-p longest-p
+                                 never-newline-p timeout)
+  => match-result-or-nil
+```
+
+Runs the bounded advanced executor directly against an advanced `regex` and
+returns a `match-result` or `nil`, the same execution `scan` and the other
+match entry points dispatch to automatically whenever `regex-advanced-p` is
+true. `shortest-p` and `longest-p` select the match policy and are mutually
+exclusive. `timeout` covers the complete advanced execution and uses the same
+positive-seconds contract as the other matching APIs; the configured
+`regex-advanced-step-limit` and `regex-advanced-nest-limit` remain independent
+hard limits regardless of `timeout`.
+
+**Returns**: a `match-result`, or `nil` when no matching path exists within
+`[start, end)`.
+
+**Signals**: `advanced-regex-limit-error` (the step, state, or nesting budget
+configured on `regex` is exhausted), `regex-timeout` (`timeout` elapses).
+
+See also: [`regex-advanced-p`](api.md#regex-advanced-p), [`scan`](api.md#scan), [Conditions](conditions.md)
+
 ### `capture-locations-p`
 
 ```lisp
@@ -682,6 +718,68 @@ non-empty match is omitted and the next search starts one position later. Thus
 `a*` over `"aba"` produces spans `(0 1)` and `(2 3)`. Empty-only expressions
 still match once at every input boundary. The timeout covers the complete
 iteration, including all matches.
+
+### `all-matches-overlapping`, `do-matches-overlapping`, and `do-captures-overlapping`
+
+```lisp
+(all-matches-overlapping regex text &key (start 0) end timeout) => list-of-match-result
+(do-matches-overlapping (result regex text &key (start 0) end timeout) form*) => nil
+(do-captures-overlapping (locations regex text &key (start 0) end timeout) form*) => nil
+```
+
+Overlapping counterparts of `all-matches`, `do-matches`, and `do-captures`:
+every match in left-to-right order is reported, including one whose span
+overlaps the previous match. The next search begins one string character (or,
+for a byte regex, one octet) after the *start* of the previous match rather
+than after its end, so an empty match is reported at every eligible input
+position rather than being suppressed the way the non-overlapping family
+suppresses it. `do-captures-overlapping` reuses one `capture-locations`
+buffer across iterations, exactly as `do-captures` does.
+
+### Fuzzy matching
+
+```lisp
+(fuzzy-scan regex text &key (max-edits 1) (start 0) end timeout
+           (state-limit +default-fuzzy-state-limit+))
+  => match-result-or-nil
+(fuzzy-scan-at regex text start &key end timeout (max-edits 1)
+              (state-limit +default-fuzzy-state-limit+))
+  => match-result-or-nil
+(fuzzy-search regex text &key (max-edits 1) (start 0) end timeout
+             (state-limit +default-fuzzy-state-limit+))
+  => match-result-or-nil
+(fuzzy-search-at regex text start &key end timeout (max-edits 1)
+                (state-limit +default-fuzzy-state-limit+))
+  => match-result-or-nil
+(fuzzy-match pattern text &key (max-edits 1) (start 0) end timeout
+            (state-limit +default-fuzzy-state-limit+))
+  => match-result-or-nil
+(byte-fuzzy-match pattern text &key (max-edits 1) (start 0) end timeout
+                 (state-limit +default-fuzzy-state-limit+))
+  => match-result-or-nil
+```
+
+`fuzzy-scan` finds the leftmost match of a *regular* (non-advanced) `regex`
+while allowing up to `max-edits` Levenshtein-style insertions, deletions, and
+substitutions. At a given start position the result minimizes edit distance,
+then chooses the earliest end; the selected distance is available afterward
+through `match-edit-distance`. `state-limit` bounds the NFA states explored
+per candidate start position and defaults to `+default-fuzzy-state-limit+`
+(1,000,000). `fuzzy-scan-at` takes its search start as a required positional
+argument. `fuzzy-search` and `fuzzy-search-at` are discoverable
+search-terminology aliases for `fuzzy-scan` and `fuzzy-scan-at`, with
+identical arguments and results. `fuzzy-match` and `byte-fuzzy-match` compile
+`pattern` when it is not already a matching `regex` and then fuzzy-scan it,
+analogous to `match` and `byte-match`; prefer `fuzzy-scan` when reusing a
+compiled pattern.
+
+**Signals**: `fuzzy-match-unsupported` (`regex-advanced-p` is true for the
+supplied pattern — the advanced executor's ordered-backtracking semantics are
+not approximated by fuzzy search), `fuzzy-match-limit-error` with kind
+`:states` (`state-limit` is exhausted before a bounded match is found),
+`regex-timeout` (`timeout` elapses).
+
+See also: [`match-edit-distance`](api.md#match-edit-distance), [Conditions](conditions.md)
 
 ### `regex-set-matches`
 
@@ -742,6 +840,26 @@ member matches.
  (cl-regex-kit:compile-regex-set '("a" "b" "a")) "zab" 1)
 ;; => (0 1 2)
 ```
+
+See also: [`regex-set-matches`](api.md#regex-set-matches)
+
+### `regex-set-search` and `regex-set-search-at`
+
+```lisp
+(cl-regex-kit:regex-set-search regex-set text &key (start 0) end timeout)
+  => (values index-or-nil match-result-or-nil)
+(cl-regex-kit:regex-set-search-at regex-set text start &key end timeout)
+  => (values index-or-nil match-result-or-nil)
+```
+
+Finds the single earliest match among `regex-set`'s members, rather than
+every matching index. Returns two values: the source-pattern index and that
+member's `match-result`. When several members begin at the same position, the
+lowest source-pattern index wins. Returns `nil, nil` when no member matches.
+`regex-set-search-at` takes its search start as a required positional
+argument.
+
+**Signals**: the same conditions as `regex-set-matches`.
 
 See also: [`regex-set-matches`](api.md#regex-set-matches)
 
@@ -834,6 +952,134 @@ equivalent.
 ```
 
 See also: [`regex-set-match-p`](api.md#regex-set-match-p)
+
+## Chunked input
+
+The Pike VM and the advanced executor both require a complete input value.
+`regex-stream` owns that value while a caller delivers it in chunks, behind an
+explicit finish barrier: arbitrary lookaround, backreferences, and
+end-of-input anchors cannot be reported correctly at a chunk boundary without
+more engine state than either executor exposes, so this API buffers instead of
+approximating them.
+
+```lisp
+(make-regex-stream regex &key (start 0) timeout) => regex-stream
+(regex-stream-p object) => boolean
+(regex-stream-regex stream) => regex
+(regex-stream-start stream) => integer
+(regex-stream-timeout stream) => timeout-or-nil
+(regex-stream-length stream) => integer
+(regex-stream-text stream) => string-or-octet-vector
+(regex-stream-finished-p stream) => boolean
+(regex-stream-feed stream chunk &key (start 0) end) => stream
+(regex-stream-finish stream &key overlapping-p callback) => list-of-match-result
+(regex-stream-reset stream) => stream
+(all-stream-matches regex input-stream
+                    &key (chunk-size 4096) (start 0) end timeout)
+  => list-of-match-result
+(all-stream-matches-overlapping regex input-stream
+                                &key (chunk-size 4096) (start 0) end timeout)
+  => list-of-match-result
+(scan-stream regex input-stream
+             &key (chunk-size 4096) (start 0) end timeout)
+  => match-result-or-nil
+(do-stream-matches (match regex input-stream
+                    &key (chunk-size 4096) (start 0) end timeout) form*) => nil
+(do-stream-matches-overlapping (match regex input-stream
+                                &key (chunk-size 4096) (start 0) end timeout)
+                               form*) => nil
+(do-stream-captures (locations regex input-stream
+                     &key (chunk-size 4096) (start 0) end timeout) form*) => nil
+(do-stream-captures-overlapping (locations regex input-stream
+                                 &key (chunk-size 4096) (start 0) end timeout)
+                                form*) => nil
+```
+
+`make-regex-stream` creates a chunked input state for `regex`; `start` and
+`timeout` use the same coordinate and timeout contracts as `all-matches`.
+`regex-stream-feed` appends a string chunk (character `regex`) or octet-vector
+chunk (byte `regex`), or the selected `start..end` range of one, and returns
+the stream. Feeding after `regex-stream-finish` is an error. `regex-stream-length`
+reports the number of buffered input units, and `regex-stream-text` returns a
+copy of the input received so far so match offsets can be resolved without
+exposing the live buffer.
+
+`regex-stream-finish` performs the complete match operation — `all-matches`
+when `overlapping-p` is false, `all-matches-overlapping` when true — and
+returns a fresh list in left-to-right order. It is idempotent: the result is
+cached, so a second call returns the same matches without rematching.
+`callback`, when supplied, is invoked once for each match not yet delivered by
+an earlier successful call; if it signals partway through, a later call
+resumes at the first undelivered match rather than re-delivering earlier ones.
+`regex-stream-finished-p` becomes true once matching succeeds, even if a
+callback later signals. `regex-stream-reset` discards the buffered input and
+cached matches, after which any offsets resolved against the pre-reset
+`regex-stream-text` are no longer meaningful.
+
+`all-stream-matches` and `scan-stream` perform the same buffering-then-match
+operation while reading a Common Lisp input stream in `chunk-size`-sized
+chunks (default 4096); `all-stream-matches-overlapping` and the two
+overlapping iteration macros use overlapping traversal. Matching starts only
+after the input stream is exhausted (or `end`, an exclusive upper bound on
+input units read, is reached), which keeps the result correct for patterns
+whose match depends on later input; the input stream itself is not closed.
+`timeout` covers the read loop, matching, and any callback, provided the
+underlying stream's blocking read honors the implementation's timeout
+interruption — an arbitrary external or foreign blocking read may not be
+interruptible, so an application needing a hard deadline must supply a
+non-blocking or independently bounded stream. `regex-stream` objects and
+`capture-locations` buffers are mutable and not thread-safe; use one per
+concurrent operation.
+
+## Low-latency incremental input
+
+`incremental-regex-stream` is the bounded-memory counterpart to `regex-stream`:
+it does not retain input bytes or characters, only ordinary consuming-NFA
+matcher state, so it can emit a completed match as soon as the current state
+proves the match cannot be extended by future input, without a finish
+barrier.
+
+```lisp
+(make-incremental-regex-stream regex &key (start 0) timeout)
+  => incremental-regex-stream
+(incremental-regex-stream-p object) => boolean
+(incremental-regex-stream-regex stream) => regex
+(incremental-regex-stream-start stream) => integer
+(incremental-regex-stream-timeout stream) => timeout-or-nil
+(incremental-regex-stream-position stream) => integer
+(incremental-regex-stream-finished-p stream) => boolean
+(incremental-regex-stream-feed stream chunk &key (start 0) end)
+  => list-of-match-result
+(incremental-regex-stream-finish stream) => list-of-match-result
+(incremental-regex-stream-reset stream) => stream
+```
+
+`make-incremental-regex-stream` validates `regex` up front and signals
+`regex-syntax-error` unless it is an ordinary NFA expression built entirely
+from consuming (`:char`, `:class`, `:any`) and control (`:split`, `:jmp`,
+`:save`, `:match`) instructions, does not match the empty string, and — for a
+byte regex — does not mix raw-octet and Unicode-scalar consuming instructions
+in one program. This rejects advanced, zero-width, anchor, lookaround, and
+`\\R`/line-break expressions, whose correctness would otherwise depend on
+input this API does not keep. `incremental-regex-stream-feed` consumes a
+chunk and returns newly finalized, non-overlapping `match-result` objects
+whose offsets are absolute stream positions beginning at `start`;
+`incremental-regex-stream-finish` resolves the final pending match, if any,
+and is idempotent. `incremental-regex-stream-position` reports the absolute
+offset of the next unprocessed input unit. A caller that needs `match-string`
+on a returned result must independently retain or assemble the corresponding
+input span, since the stream itself does not.
+
+For a Unicode-aware byte regex, `feed` assembles complete UTF-8 scalars across
+chunk boundaries and retains at most three trailing pending octets when a
+scalar is split across chunks; those octets are processed once a later chunk
+completes the scalar, or when `finish` drains them. Use an explicit raw-byte
+scope such as `(?-u:...)` when the protocol delivers arbitrary octets rather
+than Unicode scalars — the validation above rejects a program that mixes both
+kinds of consuming instruction, since they cannot share one bounded pending
+frontier. A timeout during `feed` or `finish` leaves the stream's position and
+active matcher state unchanged, so a caller may retry after handling
+`regex-timeout`.
 
 ## Text transformation
 
@@ -983,14 +1229,35 @@ advanced execution path, this is always `nil` for a pattern whose
 
 See also: [`regex-advanced-p`](api.md#regex-advanced-p), [`match-result`](api.md#match-result)
 
+### `match-edit-distance`
+
+```lisp
+(cl-regex-kit:match-edit-distance match-result)
+  => non-negative-integer
+```
+
+Returns the number of insertions, deletions, and substitutions used by the
+matched path. `match-result` is a match returned by any capture-aware search.
+
+**Returns**: zero for an ordinary exact match. A match produced by `fuzzy-scan`
+or one of its aliases returns the minimum bounded edit distance selected for
+that match.
+
+**Signals**: `type-error` when `match-result` is anything other than a
+`match-result`, including `nil`.
+
+See also: [Fuzzy matching](api.md#fuzzy-matching), [`match-result`](api.md#match-result)
+
 ## Conditions
 
 Every condition this library signals inherits from `cl-regex-kit-error`, so a
 caller can handle that single class to catch any failure from the library. The
 exported condition types are `regex-syntax-error` for a pattern that cannot be
 parsed or compiled, `regex-timeout` for a matching operation that exceeds its
-`:timeout`, and `advanced-regex-limit-error` for an advanced pattern that
-exhausts a step, state, or nesting budget.
+`:timeout`, `advanced-regex-limit-error` for an advanced pattern that
+exhausts a step, state, or nesting budget, and `fuzzy-match-unsupported` and
+`fuzzy-match-limit-error` for the fuzzy-matching family's own rejection and
+resource-limit cases.
 
 [Conditions](conditions.md) documents each type and its readers, with handling
 examples. The **Signals** field of each entry above names the conditions that

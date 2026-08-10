@@ -114,6 +114,7 @@
    #:capture-location-end
    #:scan-captures-into
    #:scan-captures-into-at
+   #:run-advanced-regex
    ;; Text transformation
    #:split
    #:split-terminator
