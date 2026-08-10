@@ -196,6 +196,7 @@ not part of the CI gate.
 nix develop          # SBCL with CL_SOURCE_REGISTRY already set
 nix build            # -> ./result/bin/cl-regex-kit-grep
 nix run .#test       # run the test suite
+nix run .#benchmark  # run the benchmark suite with configurable defaults
 nix develop --command env CL_REGEX_KIT_COVERAGE_DIRECTORY="$PWD/coverage" \
   sbcl --script run-coverage.lisp  # write an HTML coverage report locally
 nix flake check      # tests + benchmark + formatting + docs, the CI gate

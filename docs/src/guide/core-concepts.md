@@ -1,7 +1,9 @@
 # Core concepts
 
-`cl-regex-kit` compiles a pattern in three stages, following the Thompson
-NFA and Pike VM design that RE2 and Rust's `regex` crate also ship in
+`cl-regex-kit` compiles a pattern in three stages, following the Thompson NFA
+and Pike VM design Russell Cox documents in
+["Regular Expression Matching Can Be Simple and Fast"](https://swtch.com/~rsc/regexp/regexp1.html)
+and its sequels, and that RE2 and Rust's `regex` crate also ship in
 production.
 
 A pattern string becomes a token vector (`regex-tokenizer.lisp`), which becomes
