@@ -208,12 +208,12 @@ characters, so `\1` is not a capture reference.
 ## Current differences
 
 - Unicode property support is backed by SBCL's Unicode data. Case-insensitive
-  matching uses Rust regex-syntax's generated Unicode 16 simple-case-folding
-  table. General categories, Script, Block, Age, and the binary
-  properties exposed by SBCL (including `Hex_Digit`, `Cased`,
+  matching uses a Unicode 17.0.0 simple-case-folding table generated from the
+  official UCD CaseFolding.txt. General categories, Script, Block, Age, and
+  the binary properties exposed by SBCL (including `Hex_Digit`, `Cased`,
   `Case_Ignorable`, `Default_Ignorable_Code_Point`, `Ideographic`, `Math`,
   `Soft_Dotted`, and `Bidi_Mirrored`) are supported. The engine also
-  provides Unicode 16 range definitions for `Bidi_Control`, `Deprecated`,
+  provides Unicode 17.0.0 range definitions for `Bidi_Control`, `Deprecated`,
   `Emoji`, `Emoji_Component`, `Emoji_Modifier`, `Emoji_Modifier_Base`,
   `Emoji_Presentation`, `Extended_Pictographic`, `Grapheme_Link`,
   `Logical_Order_Exception`, `Other_Grapheme_Extend`,
@@ -222,11 +222,11 @@ characters, so `\1` is not a capture reference.
   `Terminal_Punctuation`, `Unified_Ideograph`,
   `IDS_*_Operator`, `Noncharacter_Code_Point`, `Pattern_White_Space`,
   `Regional_Indicator`, and `Variation_Selector`, including their UCD short
-  aliases accepted by Rust regex (`Dia`, `IDSB`, `JoinC`, `MCM`, `OAlpha`,
-  `OIDC`, `PatSyn`, `XIDS`, and `XIDC`, for example). It additionally provides
-  Unicode 16 static ranges for `ID_Compat_Math_*`,
-  `Indic_Conjunct_Break`, `Modifier_Combining_Mark`, and the `Other_*`
-  binary properties. Segmentation properties accept UCD short and long property and value
+  aliases accepted by Rust regex (`Dia`, `IDSB`, `PatSyn`, `XIDS`, and
+  `XIDC`, for example). It additionally provides Unicode 16.0.0 static
+  ranges for `Indic_Conjunct_Break`, vendored from the
+  `unicode-segmentation` crate's generated tables and not yet regenerated
+  against a newer UCD. Segmentation properties accept UCD short and long property and value
 forms, such as `GCB=RI`, `Word_Break=Katakana`, and `SB=AT`.
   `ID_Start` and `ID_Continue` are calculated from SBCL general
   categories plus the UCD-defined exceptions. `scx` and `Script_Extensions`
@@ -235,8 +235,8 @@ forms, such as `GCB=RI`, `Word_Break=Katakana`, and `SB=AT`.
   `Script`. Script aliases such as `\\p{Grek}`, `\\p{Greek}`,
   `scx=Hira`, `Script=Greek`,
 `Block=Greek_And_Coptic`, `Age=V15_0`, `Age=15.1`, `Age=V15_1`, and the Rust
-alias `Age=v151` are supported. Age uses the same static Unicode 16 range data as
-  Rust `regex-syntax`. Unknown names and values signal `regex-syntax-error`;
+alias `Age=v151` are supported. Age uses Unicode 17.0.0 range data generated
+  from the UCD. Unknown names and values signal `regex-syntax-error`;
   they are never silently compiled as a class that cannot match.
 - The project currently targets SBCL; portability across Common Lisp
   implementations has not been established.
