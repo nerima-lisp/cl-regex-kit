@@ -85,3 +85,19 @@ while a page is mid-edit.
 When changing documentation, keep the public API entries aligned with the
 exports in `src/package.lisp`, use package-qualified Common Lisp in runnable
 examples, and add every new page to `nav:`.
+
+## Releases
+
+The `:version` in `cl-regex-kit.asd` is the single source of truth for the
+package release. A release tag must use the corresponding `v<version>` form.
+Before tagging, run the full flake check:
+
+```console
+nix flake check --print-build-logs
+```
+
+Push `main` and the matching tag to start the release workflow. The workflow
+verifies the tag against the ASDF version and creates a draft GitHub Release
+after the checks pass. Review the generated artifact and publish the draft with
+release notes once the workflow is green; GitHub Release notes are the
+project's changelog.
