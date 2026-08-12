@@ -69,3 +69,42 @@
               (integerp (cl-regex-kit::inst-b instruction))))
           program)
         :to-be-truthy))))
+
+(it
+  "merges NFA programs through the owned executor path and rejects unknown nodes"
+  (let* ((cl-regex-kit::*nfa-merge-parallelism-override* 2)
+         (programs
+           (vector
+             (vector
+               (cl-regex-kit::make-inst
+                 :op :char
+                 :a (make-instance 'cl-regex-kit::literal-node :char #\a)
+                 :b 1)
+               (cl-regex-kit::make-inst :op :match))
+             (vector
+               (cl-regex-kit::make-inst
+                 :op :char
+                 :a (make-instance 'cl-regex-kit::literal-node :char #\b)
+                 :b 1)
+               (cl-regex-kit::make-inst :op :match))))
+         (offsets #(2 4))
+         (merged (make-array 6 :initial-element nil)))
+    (cl-regex-kit::merge-programs-into programs offsets merged)
+    (expect (cl-regex-kit::inst-op (aref merged 2)) :to-be :char)
+    (expect (cl-regex-kit::inst-b (aref merged 2)) :to-be 3)
+    (expect (cl-regex-kit::inst-op (aref merged 3)) :to-be :set-match)
+    (expect (cl-regex-kit::inst-a (aref merged 3)) :to-be 0)
+    (expect (cl-regex-kit::inst-op (aref merged 4)) :to-be :char)
+    (expect (cl-regex-kit::inst-b (aref merged 4)) :to-be 5)
+    (expect (cl-regex-kit::inst-op (aref merged 5)) :to-be :set-match)
+    (expect (cl-regex-kit::inst-a (aref merged 5)) :to-be 1))
+  (signals
+    error
+    (cl-regex-kit::relocate-nfa-instruction
+      (cl-regex-kit::make-inst :op :bogus)
+      0
+      0))
+  (signals
+    error
+    (cl-regex-kit::compile-node
+      (make-instance 'cl-regex-kit::regex-node))))

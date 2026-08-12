@@ -12,7 +12,7 @@
   :author "takeokunn <bararararatty@gmail.com>"
   :maintainer "takeokunn <bararararatty@gmail.com>"
   :license "MIT"
-  :version "1.0.0"
+  :version "2.0.0"
   :homepage "https://github.com/nerima-lisp/cl-regex-kit"
   :bug-tracker "https://github.com/nerima-lisp/cl-regex-kit/issues"
   :source-control (:git "https://github.com/nerima-lisp/cl-regex-kit.git")
@@ -40,6 +40,8 @@
                (:file "regex-tokenizer-escapes")
                (:file "regex-tokenizer")
                (:file "regex-grammar-support")
+               (:file "regex-grammar-groups")
+               (:file "regex-grammar-atoms")
                (:file "regex-grammar")
                (:file "regex-grammar-classes")
                (:file "nfa")
@@ -54,20 +56,28 @@
                  (:file "pike-vm-closure")
                  (:file "pike-vm-capture")
                  (:file "pike-vm-set")))
-               (:file "api")
+               (:file "api-regex")
+               (:file "api-compile")
                (:file "advanced-state")
                (:file "advanced-input")
                (:file "advanced-grapheme")
                (:file "advanced-captures")
                (:file "advanced-boundaries")
+               (:file "advanced-assertions")
+               (:file "advanced-structure")
                (:file "advanced-match")
+               (:file "advanced-search")
+               (:file "advanced-runner")
+               (:file "api-match-support")
                (:file "api-match")
+               (:file "fuzzy-runner")
                (:file "fuzzy-match")
                (:file "api-operations")
                (:file "streaming")
                (:file "incremental-streaming")
                (:file "api-replace")
-               (:file "regex-set"))
+               (:file "regex-set-compile")
+               (:file "regex-set-match"))
   :in-order-to ((test-op (test-op "cl-regex-kit/test"))))
 
 (asdf:defsystem "cl-regex-kit/cli"
@@ -75,7 +85,7 @@
   :author "takeokunn <bararararatty@gmail.com>"
   :maintainer "takeokunn <bararararatty@gmail.com>"
   :license "MIT"
-  :version "1.0.0"
+  :version "2.0.0"
   :homepage "https://github.com/nerima-lisp/cl-regex-kit"
   :bug-tracker "https://github.com/nerima-lisp/cl-regex-kit/issues"
   :source-control (:git "https://github.com/nerima-lisp/cl-regex-kit.git")
@@ -92,33 +102,48 @@
   :author "takeokunn <bararararatty@gmail.com>"
   :maintainer "takeokunn <bararararatty@gmail.com>"
   :license "MIT"
-  :version "1.0.0"
+  :version "2.0.0"
   :homepage "https://github.com/nerima-lisp/cl-regex-kit"
   :bug-tracker "https://github.com/nerima-lisp/cl-regex-kit/issues"
   :source-control (:git "https://github.com/nerima-lisp/cl-regex-kit.git")
-  :depends-on ("cl-regex-kit" "cl-regex-kit/cli" "cl-weave")
+  :depends-on ("cl-regex-kit" "cl-regex-kit/cli" "cl-regex-kit/benchmark" "cl-weave"
+               "cl-json-kit" "cl-codec-kit")
   :pathname "t"
   :serial t
   :components ((:file "package")
                (:file "matchers")
+               (:file "matchers-advanced")
+               (:file "unicode-matchers")
+               (:file "unicode-property-matchers")
                (:file "ast-test")
                (:file "parser-test")
                (:file "nfa-test")
                (:file "pike-vm-test")
                (:file "api-test")
+               (:file "api-advanced-test")
                (:file "api-unicode-test")
                (:file "api-properties-test")
                (:file "api-options-test")
                (:file "api-operations-test")
                (:file "api-operations-byte-test")
+               (:file "api-regex-set-test")
+               (:file "api-regex-set-execution-test")
                (:file "streaming-test")
                (:file "incremental-streaming-test")
                (:file "api-replace-test")
+               (:file "api-fuzzy-test")
+               (:file "benchmark-test")
                (:file "advanced-edge-test")
                (:file "advanced-boundary-test")
+               (:file "advanced-cases-test")
+               (:file "advanced-cases-boundary-test")
+               (:file "advanced-cases-control-test")
+               (:file "advanced-cases-evaluator-test")
+               (:file "advanced-cases-state-test")
                (:file "ast-edge-test")
                (:file "tokenizer-edge-test")
-               (:file "cli-test"))
+               (:file "cli-test")
+               )
   :perform (test-op
             (operation component)
             (declare (ignore operation component))
@@ -129,7 +154,7 @@
 
 (asdf:defsystem "cl-regex-kit/benchmark"
   :description "Benchmark system for cl-regex-kit"
-  :depends-on ("cl-regex-kit")
+  :depends-on ("cl-regex-kit" "cl-dataflow" "cl-json-kit")
   :pathname "benchmarks"
   :serial t
   :components ((:file "package") (:file "suite")))

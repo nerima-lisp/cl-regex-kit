@@ -383,7 +383,7 @@
      :to-be-truthy)
     (expect
      (cl-regex-kit::%advanced-special-boundary-p
-      (make-instance 'cl-regex-kit::anchor-node :kind :unknown)
+     (make-instance 'cl-regex-kit::anchor-node :kind :unknown)
       context
       0)
      :to-be-null)))

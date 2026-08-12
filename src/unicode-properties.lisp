@@ -23,6 +23,10 @@
         (member character '(#\_ #\- #\Space)))
       name)))
 
+(defun %string-prefix-p (prefix string)
+  (and (>= (length string) (length prefix))
+       (string= prefix string :end2 (length prefix))))
+
 (defun normalized-property-value-name (name)
   "Normalize a Unicode property value using UAX #44 loose matching.
 
@@ -30,16 +34,14 @@ In addition to the separators handled by NORMALIZED-PROPERTY-NAME, UAX #44
 allows one leading IS prefix on a property value.  Keep the two-character
 value IS intact: it is a real alias in some Unicode property domains."
   (let ((normalized (normalized-property-name name)))
-    (if (and (> (length normalized) 2)
-             (string= normalized "IS" :end1 2 :end2 2))
+    (if (and (plusp (- (length normalized) 2))
+             (%string-prefix-p "IS" normalized))
         (subseq normalized 2)
         normalized)))
 
 (defun property-value (property prefixes)
   (loop for prefix in prefixes
-        when (and
-      (>= (length property) (length prefix))
-      (string= property prefix :end1 (length prefix) :end2 (length prefix)))
+        when (%string-prefix-p prefix property)
           do (return (subseq property (length prefix)))))
 
 (defun property-value-loose (property prefixes)
@@ -139,7 +141,7 @@ value IS intact: it is a real alias in some Unicode property domains."
   "Return RAW-PROPERTY as a known Unicode block name, or NIL."
   (let ((candidate
           (or (property-value-loose raw-property (list "BLK=" "BLOCK="))
-              (and (> (length raw-property) 2)
+              (and (plusp (- (length raw-property) 2))
                    (string= raw-property "IN" :end1 2 :end2 2)
                    (subseq raw-property 2)))))
     (and candidate

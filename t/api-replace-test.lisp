@@ -19,115 +19,90 @@
   (("(a)") "a" "\\\\" "\\\\"))
  "expands dollar template ~S over ~S to ~S"
  (options text template expected)
- (expect
+(expect
   (replace-all (apply (function compile-regex) options) text template)
   :to-equal
   expected))
 
-(it
+(it-replace-cases
  "applies dollar templates on every replacement entry point"
- (let ((regex (compile-regex "(a)")))
-   (expect (replace-first regex "aa" "[$1]") :to-equal "[a]a")
-   (expect (replace-n regex "aa" "[$1]" 1) :to-equal "[a]a")
-   (expect (replace-all regex "aa" "[$1]") :to-equal "[a][a]")))
+ #'compile-regex
+ "(a)"
+ (replace-first "aa" "[$1]" "[a]a")
+ (replace-n "aa" "[$1]" "[a]a" 1)
+ (replace-all "aa" "[$1]" "[a][a]"))
 
-(it
+(it-replace-cases
  "accepts functional replacements without a template parser"
- (let ((regex (compile-regex "(a)")))
-   (expect
-    (replace-all
-     regex
-     "a"
-     (lambda (result text)
-       (match-group-string result 1 text)))
-    :to-equal
-    "a")))
+ #'compile-regex
+ "(a)"
+ (replace-all
+  "a"
+  (lambda (result text)
+    (match-group-string result 1 text))
+  "a"))
 
 ;;; Octet templates mirror the character-domain dollar syntax.
-(it
+(it-byte-replace-cases
  "expands byte dollar templates and leaves backslashes literal"
- (flet ((octets (&rest values)
-          (make-array
-           (length values)
-           :element-type
-           (quote (unsigned-byte 8))
-           :initial-contents
-           values)))
-   (let ((regex (compile-byte-regex "(?<w>A)(B)")))
-     (expect
-      (coerce
-       (replace-all regex (octets 65 66) (octets #x24 #x31))
-       (quote list))
-      :to-equal
-      (quote (65)))
-     (expect
-      (coerce
-       (replace-all regex (octets 65 66) (octets #x24 #x7b #x77 #x7d))
-       (quote list))
-      :to-equal
-      (quote (65)))
-     (expect
-      (coerce
-       (replace-all regex (octets 65 66) (octets #x5c #x31))
-       (quote list))
-      :to-equal
-      (quote (92 49)))
-     (expect
-      (coerce
-       (replace-all regex (octets 65 66) (octets #x5c #x26))
-       (quote list))
-      :to-equal
-      (quote (92 38))))))
+ #'compile-byte-regex
+ "(?<w>A)(B)"
+ (replace-all (octets 65 66) (octets #x24 #x31) (quote (65)))
+ (replace-all (octets 65 66) (octets #x24 #x7b #x77 #x7d) (quote (65)))
+ (replace-all
+  (octets 65 66)
+  (octets #x24 #x24 #x24 #x7b #x77 #x7d #x2d #x24 #x6d #x69 #x73 #x73 #x69 #x6e
+          #x67 #x2d #x24 #x7b #x32 #x7d #x2d #x24)
+  (quote (36 65 45 45 66 45 36)))
+ (replace-all (octets 65 66) (octets #x24) (quote (36)))
+ (replace-all (octets 65 66) (octets #x24 #x77 #x6f #x72 #x64 #x78) (quote ()))
+ (replace-all (octets 65 66) (octets #x24 #x7b #x7d) (quote ()))
+ (replace-all
+  (octets 65 66)
+  (octets #x24 #x7b #x77 #x7d)
+  (quote (65)))
+ (replace-all
+  (octets 65 66)
+  (octets #x24 #x7b #x77)
+  (quote (36 123 119)))
+ (replace-all (octets 65 66) (octets #x24 #x2d) (quote (36 45)))
+ (replace-all (octets 65 66) (octets #x5c #x31) (quote (92 49)))
+ (replace-all (octets 65 66) (octets #x5c #x26) (quote (92 38))))
 
-(it
+(it-byte-replace-cases
  "expands numeric captures in byte replacements"
- (flet ((octets (&rest values)
-          (make-array
-           (length values)
-           :element-type
-           '(unsigned-byte 8)
-           :initial-contents
-           values)))
-   (let ((result
-          (replace-first
-           (compile-byte-regex "(A)(B)?")
-           (octets 65 66)
-           (octets 36 48 45 36 49 45 36 50))))
-     (unless (equalp result (octets 65 66 45 65 45 66))
-       (error "Unexpected numeric byte replacement: ~S" (coerce result 'list))))))
+ #'compile-byte-regex
+ "(A)(B)?"
+ (replace-first
+  (octets 65 66)
+  (octets 36 48 45 36 49 45 36 50)
+  (quote (65 66 45 65 45 66))))
 
-(it
- "supports functional replacements for character and byte input"
- (flet ((octets (&rest values)
-          (make-array
-           (length values)
-           :element-type
-           '(unsigned-byte 8)
-           :initial-contents
-           values)))
-   (expect
-    (replace-all
-     (compile-regex "(a)")
-     "aba"
-     (lambda (result text)
-       (declare (ignore result text))
-       "X"))
-    :to-equal
-    "XbX")
-   (let ((result
-          (replace-all
-           (compile-byte-regex "(A)")
-           (octets 65 66 65)
-           (lambda (result text)
-             (declare (ignore result text))
-             (octets 88)))))
-     (unless (equalp result (octets 88 66 88))
-       (error
-        "Unexpected functional byte replacement: ~S"
-        (coerce result 'list))))))
+(it-replace-cases
+ "supports functional replacements for character input"
+ #'compile-regex
+ "(a)"
+ (replace-all
+  "aba"
+  (lambda (result text)
+    (declare (ignore result text))
+    "X")
+  "XbX"))
 
-(it
+(it-byte-replace-cases
+ "supports functional replacements for byte input"
+ #'compile-byte-regex
+ "(A)"
+ (replace-all
+  (octets 65 66 65)
+  (lambda (result text)
+    (declare (ignore result text))
+    (octets 88))
+  (quote (88 66 88))))
+
+(it-replace-cases
  "expands numeric and optional captures in replacements"
- (let ((regex (compile-regex "(a)(b)?")))
-   (expect (replace-first regex "ab" "$0/$1/$2/$12") :to-equal "ab/a/b/")
-   (expect (replace-first regex "a" "$0-$1-$2-$3") :to-equal "a-a--")))
+ #'compile-regex
+ "(a)(b)?"
+ (replace-first "ab" "$0/$1/$2/$12" "ab/a/b/")
+ (replace-first "a" "$0-$1-$2-$3" "a-a--"))

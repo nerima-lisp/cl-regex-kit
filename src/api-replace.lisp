@@ -1,14 +1,16 @@
 (in-package #:cl-regex-kit)
 
+(defun replacement-capture-index (match-result designator)
+  (if (integerp designator)
+      designator
+      (and (find designator
+                 (match-result-group-names match-result)
+                 :key #'car
+                 :test #'string=)
+           (resolve-group-index match-result designator))))
+
 (defun replacement-capture (match-result text designator empty-value)
-  (let ((index
-          (if (integerp designator)
-              designator
-              (and (find designator
-                         (match-result-group-names match-result)
-                         :key #'car
-                         :test #'string=)
-                   (resolve-group-index match-result designator)))))
+  (let ((index (replacement-capture-index match-result designator)))
     (if (and
          (integerp index)
          (<= 0 index)
@@ -47,6 +49,26 @@
 (defun byte-replacement-name-character-p (octet)
   (let ((character (ascii-octet-character octet)))
     (and character (replacement-name-character-p character))))
+
+(defun byte-replacement-designator (token)
+  (when (every (lambda (octet)
+                 (< octet 128))
+               token)
+    (replacement-designator
+     (map 'string #'ascii-octet-character token))))
+
+(defun make-octet-output-buffer ()
+  (make-array
+   0
+   :element-type '(unsigned-byte 8)
+   :adjustable t
+   :fill-pointer 0))
+
+(defun append-octets (output octets)
+  "Append OCTETS to the adjustable octet OUTPUT buffer and return OUTPUT."
+  (loop for octet across octets
+        do (vector-push-extend octet output))
+  output)
 
 (defun expand-replacement-template-generic (template
                                             sigil
@@ -91,72 +113,108 @@
                     (setf position (1- end)))))))
         finally (return output)))
 
-(defun expand-replacement-template (template match-result text)
-  "Expand dollar-style TEMPLATE capture references for MATCH-RESULT."
-  (with-output-to-string (output)
-    (expand-replacement-template-generic
-     template
-     #\$
-     #\{
-     #\}
-     (function replacement-name-character-p)
-     (lambda (character output)
-       (write-char character output))
-     (lambda (token output)
-       (write-string
-        (replacement-capture-string
-         match-result
-         text
-         (replacement-designator token))
-        output))
-     output)))
+(defun emit-byte-replacement-capture (token output match-result text)
+  (let ((designator (byte-replacement-designator token)))
+    (when designator
+      (append-octets
+       output
+       (replacement-capture
+        match-result
+        text
+        designator
+        (empty-octet-vector))))))
 
-(defun expand-byte-replacement-template (template match-result text)
-  "Expand ASCII dollar-style byte TEMPLATE capture references."
-  (expand-replacement-template-generic
-   template
-   #x24
-   #x7b
-   #x7d
-   (function byte-replacement-name-character-p)
-   (lambda (octet output)
-     (vector-push-extend octet output))
-   (lambda (token output)
-     (when (every
-            (lambda (octet)
-              (< octet 128))
-            token)
-       (let ((name (map (quote string) (function ascii-octet-character) token)))
-         (loop for octet across (replacement-capture
-                                 match-result
-                                 text
-                                 (if (every (function digit-char-p) name) (parse-integer
-                                                                           name)
-                                   name)
-                                 (empty-octet-vector))
-               do (vector-push-extend octet output)))))
-   (make-array
-    0
-    :element-type
-    (quote (unsigned-byte 8))
-    :adjustable
-    t
-    :fill-pointer
-    0)))
+(defmacro define-replacement-template-expander
+    (name
+     (&key
+      documentation
+      sigil
+      open-brace
+      close-brace
+      name-character-p
+      byte-domain-p
+      capture-form))
+  "Define one specialized dollar-template expander from declarative pieces.
 
-(defun replacement-string (replacement match-result text)
-  (let ((value
-         (if (functionp replacement) (funcall replacement match-result text)
-           (expand-replacement-template replacement match-result text))))
-    (check-type value string)
-    value))
+The scanner stays in EXPAND-REPLACEMENT-TEMPLATE-GENERIC; this macro only
+describes domain-specific literals, capture-token parsing, and output shape."
+  `(defun ,name (template match-result text)
+     ,documentation
+     ,(if byte-domain-p
+          `(let ((output (make-octet-output-buffer)))
+             (expand-replacement-template-generic
+              template
+              ,sigil
+              ,open-brace
+              ,close-brace
+              (function ,name-character-p)
+              (lambda (element output)
+                (vector-push-extend element output))
+              (lambda (token output)
+                ,capture-form)
+              output))
+          `(with-output-to-string (output)
+             (expand-replacement-template-generic
+              template
+              ,sigil
+              ,open-brace
+              ,close-brace
+              (function ,name-character-p)
+              (lambda (element output)
+                (write-char element output))
+              (lambda (token output)
+                ,capture-form)
+              output)))))
 
-(defun replacement-octets (replacement match-result text)
-  (let ((value
-         (if (functionp replacement) (funcall replacement match-result text)
-           (expand-byte-replacement-template replacement match-result text))))
-    (check-type value octet-vector)
-    value))
+(define-replacement-template-expander
+    expand-replacement-template
+    (:documentation "Expand dollar-style TEMPLATE capture references for MATCH-RESULT."
+     :sigil #\$
+     :open-brace #\{
+     :close-brace #\}
+     :name-character-p replacement-name-character-p
+     :capture-form
+     (write-string
+      (replacement-capture-string
+       match-result
+       text
+       (replacement-designator token))
+      output)))
+
+(define-replacement-template-expander
+    expand-byte-replacement-template
+    (:documentation "Expand ASCII dollar-style byte TEMPLATE capture references."
+     :sigil #x24
+     :open-brace #x7b
+     :close-brace #x7d
+     :name-character-p byte-replacement-name-character-p
+     :byte-domain-p t
+     :capture-form
+     (emit-byte-replacement-capture token output match-result text)))
+
+(defmacro define-replacement-value-reader
+    (name replacement-type expander &optional documentation)
+  "Define one replacement resolver that accepts functions or templates."
+  `(defun ,name (replacement match-result text)
+     ,documentation
+     (let ((value
+            (if (functionp replacement)
+                (funcall replacement match-result text)
+                (,expander replacement match-result text))))
+       (check-type value ,replacement-type)
+       value)))
+
+(define-replacement-value-reader
+    replacement-string
+    string
+    expand-replacement-template
+  "Resolve REPLACEMENT in the character domain.")
+
+(define-replacement-value-reader
+    replacement-octets
+    octet-vector
+    expand-byte-replacement-template
+  "Resolve REPLACEMENT in the octet domain.")
 
 (defun replacement-value (regex replacement match-result text)
   (if (byte-regex-p regex) (replacement-octets replacement match-result text)
@@ -231,15 +289,7 @@
   (validate-replacement regex replacement)
   (when (zerop (or limit 1))
     (return-from replace-up-to text))
-  (if (byte-regex-p regex) (let ((output
-                                  (make-array
-                                   0
-                                   :element-type
-                                   (quote (unsigned-byte 8))
-                                   :adjustable
-                                   t
-                                   :fill-pointer
-                                   0)))
+  (if (byte-regex-p regex) (let ((output (make-octet-output-buffer)))
                              (accumulate-replacements
                               regex
                               text
@@ -249,8 +299,7 @@
                               end
                               timeout
                               (lambda (octets)
-                                (loop for octet across octets
-                                      do (vector-push-extend octet output))))
+                                (append-octets output octets)))
                              output)
     (with-output-to-string (output)
       (accumulate-replacements

@@ -90,20 +90,19 @@
       (otherwise nil))))
 
 (defun %advanced-capture-index (node context &optional state)
-  (or
-   (and
-    (backreference-node-capture-index node)
-    (backreference-node-capture-index node))
-   (and
-    (backreference-node-name node)
+  (let ((capture-index (backreference-node-capture-index node)))
     (or
-     (%advanced-capture-index-by-name
+     capture-index
+     (and
       (backreference-node-name node)
-      context
-      state)
-     (let ((group
-            (%advanced-find-group
-             (advanced-context-root context)
-             :name
-             (backreference-node-name node))))
-       (%advanced-capture-index-for-group group))))))
+      (or
+       (%advanced-capture-index-by-name
+        (backreference-node-name node)
+        context
+        state)
+       (let ((group
+              (%advanced-find-group
+               (advanced-context-root context)
+               :name
+               (backreference-node-name node))))
+         (%advanced-capture-index-for-group group)))))))

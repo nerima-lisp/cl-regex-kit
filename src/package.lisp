@@ -51,12 +51,8 @@
    ;; Matching and iteration
    #:scan
    #:scan-at
-   #:regex-search
-   #:regex-search-at
    #:fuzzy-scan
    #:fuzzy-scan-at
-   #:fuzzy-search
-   #:fuzzy-search-at
    #:captures
    #:captures-at
    #:shortest-match

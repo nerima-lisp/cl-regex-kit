@@ -28,6 +28,17 @@
   (expect (cl-regex-kit::parse-regex "\\p{Age=V15_1}") :to-be-truthy)
   (expect (cl-regex-kit::parse-regex "\\p{Age=v151}") :to-be-truthy))
 
+(it-each (("a{1000}" t)
+          ("a{999,1000}" t)
+          ("a{1001}" nil)
+          ("a{999,1001}" nil))
+    "enforces the parser repeat-count limit for ~S"
+    (pattern validp)
+  (if validp
+      (expect (cl-regex-kit::parse-regex pattern) :to-be-truthy)
+      (signals regex-syntax-error
+        (cl-regex-kit::parse-regex pattern))))
+
 (defun escape-form-text (designator)
   "Translate a symbolic ESCAPE-FORM-TEST row designator to its literal text."
   (case designator
@@ -39,6 +50,15 @@
     (:start-of-heading (string (code-char 1)))
     (:line-feed (string #\Newline))
     (otherwise designator)))
+
+(defun nested-group-pattern (depth)
+  "Build a regex with DEPTH nested capturing groups around a literal."
+  (with-output-to-string (stream)
+    (loop repeat depth
+          do (write-char #\( stream))
+    (write-char #\a stream)
+    (loop repeat depth
+          do (write-char #\) stream))))
 
 (it-each (("\\d" "5" t) ("\\D" "x" t) ("\\s" :tab t) ("\\P{ASCII}" "é" t)
           ("\\x{41}" "A" t) ("\\u0041" "A" t) ("\\U00000041" "A" t)
@@ -80,9 +100,13 @@
           :to-be-truthy)
   (expect (typep (cl-regex-kit::parse-regex "(?<part_2>x)")
                  'cl-regex-kit::group-node) :to-be-truthy)
-  (dolist (pattern '("(?<part.name>x)" "(?<part[2]>x)" "(?<Δ>x)"))
-    (expect (typep (cl-regex-kit::parse-regex pattern)
-                   'cl-regex-kit::group-node) :to-be-truthy))
+  (expect-truthy-cases
+   (typep (cl-regex-kit::parse-regex "(?<part.name>x)")
+          'cl-regex-kit::group-node)
+   (typep (cl-regex-kit::parse-regex "(?<part[2]>x)")
+          'cl-regex-kit::group-node)
+   (typep (cl-regex-kit::parse-regex "(?<Δ>x)")
+          'cl-regex-kit::group-node))
   (expect (typep (cl-regex-kit::parse-regex
                   (format nil "(?<~Ca~C~C>x)"
                           (code-char #x2160) ; Alphabetic, Nl
@@ -92,8 +116,11 @@
           :to-be-truthy)
   (signals regex-syntax-error
     (cl-regex-kit::parse-regex (format nil "(?<a~Cb>x)" (code-char #x203f))))
-  (dolist (pattern '("(?<2part>x)" "(?<.part>x)" "(?<[part>x)"))
-    (signals regex-syntax-error (cl-regex-kit::parse-regex pattern)))
+  (expect-signals-cases
+   regex-syntax-error
+   (cl-regex-kit::parse-regex "(?<2part>x)")
+   (cl-regex-kit::parse-regex "(?<.part>x)")
+   (cl-regex-kit::parse-regex "(?<[part>x)"))
   (signals regex-syntax-error (cl-regex-kit::parse-regex "(?<name>a)(?<name>b)"))
   (expect (typep (cl-regex-kit::parse-regex "(?=a)") (quote cl-regex-kit::lookaround-node)) :to-be-truthy))
 
@@ -136,10 +163,10 @@
     (expect "a" :to-match-regex regex)
     (expect-not "A" :to-match-regex regex)))
 
-(it "treats non-boundary escapes as literals inside a character class"
-  (dolist (pattern '("[\\B]" "[\\C]" "[\\Q]"))
-    (let ((regex (compile-regex pattern)))
-      (expect (subseq pattern 2 3) :to-match-regex regex))))
+(it-each (("[\\B]" "B") ("[\\C]" "C") ("[\\Q]" "Q"))
+    "treats ~S as a literal character inside a character class"
+    (pattern literal)
+  (expect literal :to-match-regex (compile-regex pattern)))
 
 (it "matches a lowercase byte against an uppercase-only case-insensitive class"
   (let ((regex (compile-byte-regex "(?i-u:[A-Z])")))
@@ -173,45 +200,45 @@
   (let ((flags (cl-regex-kit::make-parser-flags
                 :case-insensitive t :multi-line t :dot-matches-new-line t
                 :swap-greed t :ignore-whitespace t :unicode t :crlf t)))
-    (dolist (flag (list cl-regex-kit::+flag-case-insensitive+
-                        cl-regex-kit::+flag-multiline+
-                        cl-regex-kit::+flag-dotall+
-                        cl-regex-kit::+flag-ungreedy+
-                        cl-regex-kit::+flag-extended+
-                        cl-regex-kit::+flag-unicode+
-                        cl-regex-kit::+flag-crlf+))
-      (expect (logtest flag flags) :to-be-truthy))
+    (expect-truthy-cases
+     (logtest cl-regex-kit::+flag-case-insensitive+ flags)
+     (logtest cl-regex-kit::+flag-multiline+ flags)
+     (logtest cl-regex-kit::+flag-dotall+ flags)
+     (logtest cl-regex-kit::+flag-ungreedy+ flags)
+     (logtest cl-regex-kit::+flag-extended+ flags)
+     (logtest cl-regex-kit::+flag-unicode+ flags)
+     (logtest cl-regex-kit::+flag-crlf+ flags))
     (expect (logtest cl-regex-kit::+flag-unicode+
                      (cl-regex-kit::make-parser-flags))
             :to-be-truthy)
     (expect (logtest cl-regex-kit::+flag-unicode+
                      (cl-regex-kit::make-parser-flags :unicode nil))
             :to-be-falsy))
-  (dolist (arguments '((:case-insensitive 1)
-                       (:multi-line 1)
-                       (:dot-matches-new-line 1)
-                       (:swap-greed 1)
-                       (:ignore-whitespace 1)
-                       (:unicode 1)
-                       (:crlf 1)))
-    (signals type-error (apply #'cl-regex-kit::make-parser-flags arguments))))
+  (expect-signals-cases
+   type-error
+   (cl-regex-kit::make-parser-flags :case-insensitive 1)
+   (cl-regex-kit::make-parser-flags :multi-line 1)
+   (cl-regex-kit::make-parser-flags :dot-matches-new-line 1)
+   (cl-regex-kit::make-parser-flags :swap-greed 1)
+   (cl-regex-kit::make-parser-flags :ignore-whitespace 1)
+   (cl-regex-kit::make-parser-flags :unicode 1)
+   (cl-regex-kit::make-parser-flags :crlf 1)))
 
 (it "updates inline flags independently and restores parser nesting depth"
   (let ((flags 0))
-    (dolist (entry `((#\i ,cl-regex-kit::+flag-case-insensitive+)
-                     (#\m ,cl-regex-kit::+flag-multiline+)
-                     (#\s ,cl-regex-kit::+flag-dotall+)
-                     (#\U ,cl-regex-kit::+flag-ungreedy+)
-                     (#\x ,cl-regex-kit::+flag-extended+)
-                     (#\u ,cl-regex-kit::+flag-unicode+)
-                     (#\R ,cl-regex-kit::+flag-crlf+)
-                     (#\n ,cl-regex-kit::+flag-no-auto-capture+)
-                     (#\J ,cl-regex-kit::+flag-duplicate-names+)))
-      (destructuring-bind (character flag) entry
-        (setf flags (cl-regex-kit::update-parser-flag flags character t))
-        (expect (logtest flag flags) :to-be-truthy)
-        (setf flags (cl-regex-kit::update-parser-flag flags character nil))
-        (expect (logtest flag flags) :to-be-falsy))))
+    (dolist (entry '((#\i . cl-regex-kit::+flag-case-insensitive+)
+                     (#\m . cl-regex-kit::+flag-multiline+)
+                     (#\s . cl-regex-kit::+flag-dotall+)
+                     (#\U . cl-regex-kit::+flag-ungreedy+)
+                     (#\x . cl-regex-kit::+flag-extended+)
+                     (#\u . cl-regex-kit::+flag-unicode+)
+                     (#\R . cl-regex-kit::+flag-crlf+)
+                     (#\n . cl-regex-kit::+flag-no-auto-capture+)
+                     (#\J . cl-regex-kit::+flag-duplicate-names+)))
+      (setf flags (cl-regex-kit::update-parser-flag flags (car entry) t))
+      (expect (logtest (symbol-value (cdr entry)) flags) :to-be-truthy)
+      (setf flags (cl-regex-kit::update-parser-flag flags (car entry) nil))
+      (expect (logtest (symbol-value (cdr entry)) flags) :to-be-falsy)))
   (let ((depth 0))
     (expect (cl-regex-kit::with-parser-nesting (depth 1 (error "overflow"))
               depth)
@@ -221,6 +248,20 @@
       (cl-regex-kit::with-parser-nesting (depth 0 (error "overflow"))
         :unreachable))
     (expect depth :to-equal 0)))
+
+(it-each ((250 t)
+          (251 nil))
+    "applies the default nest-limit boundary at depth ~D"
+    (depth validp)
+  (let ((pattern (nested-group-pattern depth)))
+    (if validp
+        (expect (cl-regex-kit::parse-regex pattern) :to-be-truthy)
+        (signals regex-syntax-error
+          (cl-regex-kit::parse-regex pattern)))))
+
+(it "allows deeper nesting when an explicit nest-limit is provided"
+  (expect (cl-regex-kit::parse-regex (nested-group-pattern 251) :nest-limit 251)
+          :to-be-truthy))
 
 (it-fuzz
   "arbitrary bounded byte-mode patterns either parse or report a syntax error"
@@ -244,9 +285,10 @@
           :to-be-truthy))
 
 (it "rejects non-ASCII and Unicode-property class content in non-Unicode byte patterns"
-  (dolist (pattern (quote ("[\\p{L}]" "[\\x{e9}]")))
-    (signals regex-syntax-error
-      (cl-regex-kit::parse-regex pattern :byte-mode t :initial-flags 0)))
+  (expect-signals-cases
+   regex-syntax-error
+   (cl-regex-kit::parse-regex "[\\p{L}]" :byte-mode t :initial-flags 0)
+   (cl-regex-kit::parse-regex "[\\x{e9}]" :byte-mode t :initial-flags 0))
   ;; A raw single-octet escape is exempt: it explicitly names one byte value,
   ;; not a Unicode scalar the parser would otherwise have to reject.
   (expect (cl-regex-kit::parse-regex "[\\xe9]" :byte-mode t :initial-flags 0)
@@ -304,9 +346,20 @@
     (expect (full-match regex "aXb") :to-be-falsy)))
 
 (it "rejects an unclosed named-capture body and an unnamed group's missing < after ?P"
-  (dolist (pattern '("(?P<name" "(?<name"))
-    (signals regex-syntax-error (cl-regex-kit::parse-regex pattern))))
-(it "rejects constructs outside the current regex dialect" (dolist (pattern (quote ("(?Cx)" "(?C1x)" "(?C\"tag)" "(?{1})" "(??{1})" "a{~1}" "(*UNKNOWN)"))) (signals regex-syntax-error (cl-regex-kit::parse-regex pattern))))
+  (expect-signals-cases
+   regex-syntax-error
+   (cl-regex-kit::parse-regex "(?P<name")
+   (cl-regex-kit::parse-regex "(?<name")))
+(it "rejects constructs outside the current regex dialect"
+  (expect-signals-cases
+   regex-syntax-error
+   (cl-regex-kit::parse-regex "(?Cx)")
+   (cl-regex-kit::parse-regex "(?C1x)")
+   (cl-regex-kit::parse-regex "(?C\"tag)")
+   (cl-regex-kit::parse-regex "(?{1})")
+   (cl-regex-kit::parse-regex "(??{1})")
+   (cl-regex-kit::parse-regex "a{~1}")
+   (cl-regex-kit::parse-regex "(*UNKNOWN)")))
 (it "parses PCRE2-style callouts"
   (let ((plain (cl-regex-kit::parse-regex "(?C)"))
         (numbered (cl-regex-kit::parse-regex "(?C42)"))
@@ -314,17 +367,29 @@
     (expect (typep plain (quote cl-regex-kit::callout-node)) :to-be-truthy)
     (expect (cl-regex-kit::callout-node-number numbered) :to-equal 42)
     (expect (cl-regex-kit::callout-node-tag tagged) :to-equal "mark")
-    (dolist (pattern
-             (list "(?C\"mark\")"
-                   (format nil "(?C~Cmark~C)" (code-char 39) (code-char 39))
-                   "(?C^mark^)"
-                   "(?C%mark%)"
-                   "(?C#mark#)"
-                   "(?C$mark$)"
-                   "(?C{mark})"))
-      (expect (cl-regex-kit::callout-node-tag
-               (cl-regex-kit::parse-regex pattern))
-              :to-equal "mark"))))
+    (expect-equal-cases
+     ((cl-regex-kit::callout-node-tag
+       (cl-regex-kit::parse-regex "(?C\"mark\")"))
+      "mark")
+     ((cl-regex-kit::callout-node-tag
+       (cl-regex-kit::parse-regex
+        (format nil "(?C~Cmark~C)" (code-char 39) (code-char 39))))
+      "mark")
+     ((cl-regex-kit::callout-node-tag
+       (cl-regex-kit::parse-regex "(?C^mark^)"))
+      "mark")
+     ((cl-regex-kit::callout-node-tag
+       (cl-regex-kit::parse-regex "(?C%mark%)"))
+      "mark")
+     ((cl-regex-kit::callout-node-tag
+       (cl-regex-kit::parse-regex "(?C#mark#)"))
+      "mark")
+     ((cl-regex-kit::callout-node-tag
+       (cl-regex-kit::parse-regex "(?C$mark$)"))
+      "mark")
+     ((cl-regex-kit::callout-node-tag
+       (cl-regex-kit::parse-regex "(?C{mark})"))
+      "mark"))))
 
 (it-each (("(?<name>a)") ("(?'name'a)") ("(?P<name>a)") ("(?P'name'a)")
            ("(?<open>a)(?<-open>b)") ("(?<open-close>a)")

@@ -31,6 +31,26 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    cl-json-kit = {
+      url = "github:nerima-lisp/cl-json-kit/v1.2.0";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    cl-codec-kit = {
+      url = "github:nerima-lisp/cl-codec-kit/v0.5.0";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    cl-prolog = {
+      url = "github:nerima-lisp/cl-prolog/v1.4.3";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    cl-dataflow = {
+      url = "github:nerima-lisp/cl-dataflow/v1.1.1";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     # The parser (regex-tokenizer.lisp/regex-grammar.lisp) is built on
     # cl-parser-kit's token/span/tokenizer model, so unlike cl-weave this is
     # a real runtime dependency of the `cl-regex-kit` system itself, not
@@ -56,6 +76,13 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    # This repository already carries paredit.toml, so the dev shell should
+    # expose the org's formatter/linter instead of requiring ad-hoc installs.
+    paredit-cli = {
+      url = "github:nerima-lisp/paredit-cli/v1.6.0";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     treefmt-nix = {
       url = "github:numtide/treefmt-nix";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -68,9 +95,14 @@
       nixpkgs,
       cl-nix-forge,
       cl-weave,
+      cl-json-kit,
+      cl-codec-kit,
+      cl-prolog,
+      cl-dataflow,
       cl-parser-kit,
       cl-concurrent-kit,
       cl-cli,
+      paredit-cli,
       treefmt-nix,
     }:
     let
@@ -135,6 +167,46 @@
             };
           };
         };
+
+      # cl-json-kit's upstream flake intentionally exports `packages` only for
+      # x86_64-linux, so consuming `cl-json-kit.packages.${ctx.system}` makes
+      # aarch64-darwin evaluation fail before any benchmark or test can run.
+      # The source tree itself is portable and has no Lisp dependencies of its
+      # own (`cl-json-kit.asd`), so this repository builds the ASDF system
+      # locally from the pinned input source instead of consuming the upstream
+      # package output directly.
+      toPath = x: /. + builtins.unsafeDiscardStringContext "${x}";
+      clJsonKitSource = toPath cl-json-kit;
+      clCodecKitSource = toPath cl-codec-kit;
+      clDataflowSource = toPath cl-dataflow;
+
+      clJsonKitPackage =
+        ctx:
+        ctx.cl.lispDerivation {
+          lispSystem = "cl-json-kit";
+          version = ctx.cl.fromAsdSystem "${clJsonKitSource}/cl-json-kit.asd";
+          src = ctx.cl.mkLispSource { root = clJsonKitSource; };
+        };
+
+      clCodecKitPackage =
+        ctx:
+        ctx.cl.lispDerivation {
+          lispSystem = "cl-codec-kit";
+          version = ctx.cl.fromAsdSystem "${clCodecKitSource}/cl-codec-kit.asd";
+          src = ctx.cl.mkLispSource { root = clCodecKitSource; };
+        };
+
+      clDataflowPackage =
+        ctx:
+        ctx.cl.lispDerivation {
+          lispSystem = "cl-dataflow";
+          version = ctx.cl.fromAsdSystem "${clDataflowSource}/cl-dataflow.asd";
+          src = ctx.cl.mkLispSource { root = clDataflowSource; };
+          lispDependencies = [
+            cl-concurrent-kit.packages.${ctx.system}.cl-concurrent-kit
+            cl-prolog.packages.${ctx.system}.cl-prolog
+          ];
+        };
     in
     # `mkPackageFlake` spans systems -- it obtains a `pkgs` and its own
     # cl-nix-forge instance per entry in `systems` -- so the per-system `lib`
@@ -178,12 +250,17 @@
         cl-concurrent-kit.packages.${ctx.system}.cl-concurrent-kit
       ];
 
-      # cl-weave and cl-cli are test-only ASDF dependencies (the production
-      # system's runtime dependencies are cl-parser-kit and cl-concurrent-kit,
-      # above): `cl-regex-kit.asd`'s
-      # `cl-regex-kit/test` depends directly on cl-weave, and transitively on
-      # cl-cli through its own `:depends-on ("cl-regex-kit" "cl-regex-kit/cli"
-      # "cl-weave")`, since `cl-regex-kit/cli` (cli/main.lisp, the
+      # cl-weave, cl-codec-kit, cl-dataflow, cl-json-kit, and cl-cli are
+      # test-only ASDF
+      # dependencies (the production system's runtime dependencies are
+      # cl-parser-kit and cl-concurrent-kit, above): `cl-regex-kit.asd`'s
+      # `cl-regex-kit/test` depends directly on cl-weave, cl-json-kit, and
+      # cl-codec-kit, and
+      # transitively on cl-cli through its own `:depends-on ("cl-regex-kit"
+      # "cl-regex-kit/cli" "cl-weave")`, since
+      # it also depends on `cl-regex-kit/benchmark`, which in turn brings
+      # in cl-dataflow and cl-json-kit,
+      # `cl-regex-kit/cli` (cli/main.lisp, the
       # cl-regex-kit-grep example) is itself built on cl-cli -- see
       # `packages.cl-regex-kit-grep` below for that same edge on the
       # production side. `lispCheckDependencies` is resolved only under
@@ -193,6 +270,9 @@
       # sibling, so it is passed as-is rather than through `cl.fromDerivation`.
       lispCheckDependencies = ctx: [
         (ctx.cl.fromDerivation { drv = cl-weave.packages.${ctx.system}.cl-weave; })
+        (clJsonKitPackage ctx)
+        (clCodecKitPackage ctx)
+        (clDataflowPackage ctx)
         cl-cli.packages.${ctx.system}.cl-cli
       ];
 
@@ -222,7 +302,10 @@
       # whole docs tree.
       treefmt.evalModule = treefmt-nix.lib.evalModule;
 
-      devShellPackages = ctx: [ ctx.pkgs.perl ];
+      devShellPackages = ctx: [
+        ctx.pkgs.perl
+        paredit-cli.packages.${ctx.system}.default
+      ];
 
       # `packages.default`/`apps.default` are the DELIVERED BINARY, so that a
       # bare `nix build` in this checkout produces
@@ -252,7 +335,11 @@
             pname = "cl-regex-kit-benchmark";
             src = ./.;
             runner = "run-benchmarks.lisp";
-            lispDependencies = [ ctx.package ];
+            lispDependencies = [
+              ctx.package
+              (clDataflowPackage ctx)
+              (clJsonKitPackage ctx)
+            ];
             timeoutSeconds = 120;
             killAfterSeconds = 30;
             description = "Run the cl-regex-kit benchmark suite";

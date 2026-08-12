@@ -43,55 +43,47 @@
         (get-output-stream-string stdout)
         (get-output-stream-string stderr)))))
 
-(it
+(defun render-grep-count-output (mode files counts)
+  (ecase mode
+    (labelled
+     (with-output-to-string (stream)
+       (loop for file in files
+             for count in counts
+             do (format stream "~A:~D~%" file count))))
+    ((single-file stdin)
+     (format nil "~D~%" (first counts)))))
+
+(it-grep-count-cases
   "prints count-only results per file and labels every input"
-  (call-with-temporary-grep-files
-    (list "match
+  (labelled
+   ("match
 miss
 match
 " "miss
 match
 ")
-    (lambda (paths)
-      (let ((files (mapcar (function namestring) paths)))
-        (multiple-value-bind (exit-code stdout stderr) (run-grep-cli (append (list "-c" "match") files))
-          (expect exit-code :to-equal 0)
-          (expect
-            stdout
-            :to-equal
-            (format nil "~A:2~%~A:1~%" (first files) (second files)))
-          (expect stderr :to-equal ""))))))
-
-(it
-  "prints an unlabelled count for one file and standard input"
-  (call-with-temporary-grep-files
-    (list "match
+   ("-c" "match")
+   ""
+   0
+   (2 1))
+  (single-file
+   ("match
 miss
 ")
-    (lambda (paths)
-      (multiple-value-bind (exit-code stdout stderr) (run-grep-cli (list "-c" "match" (namestring (first paths))))
-        (expect exit-code :to-equal 0)
-        (expect stdout :to-equal (format nil "1~%"))
-        (expect stderr :to-equal ""))))
-  (multiple-value-bind (exit-code stdout stderr) (run-grep-cli (list "-c" "match") "miss
+   ("-c" "match")
+   ""
+   0
+   (1))
+  (stdin
+   nil
+   ("-c" "match")
+   "miss
 miss
-")
-    (expect exit-code :to-equal 1)
-    (expect stdout :to-equal (format nil "0~%"))
-    (expect stderr :to-equal "")))
+"
+   1
+   (0)))
 
-(it
-  "reports an invalid regular expression and exits with status 2"
-  (multiple-value-bind (exit-code stdout stderr) (run-grep-cli (list "("))
-    (expect exit-code :to-equal 2)
-    (expect stdout :to-equal "")
-    (expect (search "invalid regular expression:" stderr) :to-be-truthy)))
-
-(it
-  "reports a standard-input stream error and exits with status 2"
-  (let ((input (make-string-input-stream "match\n")))
-    (close input)
-    (multiple-value-bind (exit-code stdout stderr) (run-grep-cli (list "match") input)
-      (expect exit-code :to-equal 2)
-      (expect stdout :to-equal "")
-      (expect (search "standard input:" stderr) :to-be-truthy))))
+(it-grep-error-cases
+  "reports CLI errors with stable status codes and diagnostics"
+  (invalid-regex ("(") 2 "" "invalid regular expression:")
+  (standard-input ("match") 2 "" "standard input:"))

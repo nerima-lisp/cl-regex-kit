@@ -85,13 +85,15 @@
   (flet ((literal (character &key (unicode-p nil))
            (make-instance 'cl-regex-kit::literal-node
                           :char character :unicode-p unicode-p)))
-    (dolist (case `((#\A (65))
-                    (,(code-char #x00e9) (195 169))
-                    (,(code-char #x2603) (226 152 131))
-                    (,(code-char #x1f600) (240 159 152 128))))
-      (destructuring-bind (character expected-octets) case
-        (expect (cl-regex-kit::utf8-octets-for-character character)
-                :to-equal expected-octets)))
+    (dolist (character (list #\A
+                             (code-char #x00e9)
+                             (code-char #x2603)
+                             (code-char #x1f600)))
+      (expect (cl-regex-kit::utf8-octets-for-character character)
+              :to-equal
+              (coerce
+               (string-to-octets (string character) :encoding :utf-8)
+               'list)))
     (let* ((ascii (literal #\a))
            (unchanged-concat (make-instance 'cl-regex-kit::concat-node
                                             :children (list ascii)))
@@ -120,8 +122,15 @@
                        (gen-such-that (lambda (code) (not (<= #xd800 code #xdfff)))
                                       (gen-integer :min 0 :max #x10ffff))
                        :name :unicode-scalar)))
-  (let* ((octets (coerce (cl-regex-kit::utf8-octets-for-character character) 'vector))
+  (let* ((expected-octets (string-to-octets (string character) :encoding :utf-8))
+         (octets (coerce (cl-regex-kit::utf8-octets-for-character character) 'vector))
          (decoded (cl-regex-kit::utf8-character-at octets 0)))
+    (expect (coerce octets 'list)
+            :to-equal
+            (coerce expected-octets 'list))
+    (expect (octets-to-string octets :encoding :utf-8)
+            :to-equal
+            (string character))
     (expect decoded :to-be character)))
 
 (it "recognizes capture-stable empty and non-empty repetitions"

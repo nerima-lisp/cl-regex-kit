@@ -1,36 +1,38 @@
 (in-package #:cl-regex-kit/test)
 
-(it-each (("(?*a|ab)c")
-          ("(?<*a|b)c")
-          ("(*PLA:a)b")
-          ("(*NLA:a)b")
-          ("(*PLB:a)b")
-          ("(*NLB:a)b")
-          ("(*NAPLA:a|ab)c")
-          ("(*NAPLB:a|ab)c"))
-    "tokenized non-atomic lookarounds compile as advanced expressions"
-  (pattern)
-  (expect (regex-advanced-p (compile-regex pattern)) :to-be-truthy))
+(it-advanced-pattern-cases
+ "tokenized non-atomic lookarounds compile as advanced expressions"
+ ("(?*a|ab)c"
+  "(?<*a|b)c"
+  "(*PLA:a)b"
+  "(*NLA:a)b"
+  "(*PLB:a)b"
+  "(*NLB:a)b"
+  "(*NAPLA:a|ab)c"
+  "(*NAPLB:a|ab)c"))
 
 (it "returns a boolean advanced-engine flag"
   (let ((ordinary (regex-advanced-p (compile-regex "a")))
         (lookahead (regex-advanced-p (compile-regex "(?=a)a")))
         (balanced (regex-advanced-p (compile-regex "(?<-name>b)")))
         (anchor (regex-advanced-p (compile-regex "\\G"))))
-    (expect ordinary :to-be nil)
-    (expect lookahead :to-be t)
-    (expect balanced :to-be t)
-    (expect anchor :to-be t)
-    (dolist (value (list ordinary lookahead balanced anchor))
-      (expect (typep value 'boolean) :to-be-truthy))))
+    (expect-equal-cases
+      (ordinary nil)
+      (lookahead t)
+      (balanced t)
+      (anchor t))
+    (expect-truthy-cases
+      (typep ordinary 'boolean)
+      (typep lookahead 'boolean)
+      (typep balanced 'boolean)
+      (typep anchor 'boolean))))
 
-(it-each (("(?*(a|ab))\\1c" "abc" "abc")
-          ("(*NAPLA:(a|ab))\\1c" "abc" "abc")
-          ("(?<*(a|ab))\\1" "abab" "ab")
-          ("(*NAPLB:(a|ab))\\1" "abab" "ab"))
-    "positive non-atomic assertions retain a backtrackable capture"
-    (pattern text expected)
-  (expect (match-string (match pattern text) text) :to-equal expected))
+(it-pattern-match-string-cases
+ "positive non-atomic assertions retain a backtrackable capture"
+ (("(?*(a|ab))\\1c" "abc" "abc")
+  ("(*NAPLA:(a|ab))\\1c" "abc" "abc")
+  ("(?<*(a|ab))\\1" "abab" "ab")
+  ("(*NAPLB:(a|ab))\\1" "abab" "ab")))
 
 (it "keeps atomic groups distinct from non-atomic assertions"
   (expect (match "(?>a|ab)\\1c" "abc") :to-be-null))
@@ -70,11 +72,15 @@
 (it "classifies terminal advanced controls without treating normal states as terminal"
   (dolist (control '(:accept :commit :commit-failure :prune :skip :then))
     (let ((state (cl-regex-kit::%make-advanced-state 0 #() control)))
-      (expect (cl-regex-kit::%advanced-state-terminal-p state) :to-be-truthy)
-      (expect (cl-regex-kit::%advanced-state-normal-p state) :to-be-falsy)))
+      (expect-truthy-cases
+        (cl-regex-kit::%advanced-state-terminal-p state))
+      (expect-falsy-cases
+        (cl-regex-kit::%advanced-state-normal-p state))))
   (let ((state (cl-regex-kit::%make-advanced-state 0 #())))
-    (expect (cl-regex-kit::%advanced-state-terminal-p state) :to-be-falsy)
-    (expect (cl-regex-kit::%advanced-state-normal-p state) :to-be-truthy)))
+    (expect-falsy-cases
+      (cl-regex-kit::%advanced-state-terminal-p state))
+    (expect-truthy-cases
+      (cl-regex-kit::%advanced-state-normal-p state))))
 
 (it "reports step and nesting resource limits with their measured usage"
   (let ((step-context (cl-regex-kit::make-advanced-context

@@ -33,19 +33,15 @@
       :element-type
       'bit
       :initial-element
-      0)
+     0)
      non-matches
      :timeout
      0.0001))
-   (dolist (operation
-            (list
-             (lambda ()
-               (scan regex "a" :timeout 0))
-             (lambda ()
-               (all-matches regex "a" :timeout -1))
-             (lambda ()
-               (split regex "a" :timeout "one second"))))
-     (signals type-error (funcall operation)))))
+   (expect-signals-cases
+    type-error
+    (scan regex "a" :timeout 0)
+    (all-matches regex "a" :timeout -1)
+    (split regex "a" :timeout "one second"))))
 
 (it
  "renders public regex diagnostics with actionable context"
@@ -75,55 +71,32 @@
  "validates public matching inputs before executing the VM"
  (let ((regex (compile-regex "a"))
        (regex-set (compile-regex-set '("a"))))
-   (dolist (operation
-            (list
-             (lambda ()
-               (scan nil "a"))
-             (lambda ()
-               (scan regex nil))
-             (lambda ()
-               (scan regex "a" :start -1))
-             (lambda ()
-               (scan regex "a" :start "zero"))
-             (lambda ()
-               (cl-regex-kit:full-match-p nil "a"))
-             (lambda ()
-               (all-matches regex nil))
-             (lambda ()
-               (split regex nil))
-             (lambda ()
-               (replace-first regex nil "b"))
-             (lambda ()
-               (replace-all regex nil "b"))
-             (lambda ()
-               (regex-set-matches regex-set nil))
-             (lambda ()
-               (regex-set-matches regex-set "a" :start 2))
-             (lambda ()
-               (regex-set-matches nil "a"))))
-     (signals type-error (funcall operation)))
+   (expect-signals-cases
+    type-error
+    (scan nil "a")
+    (scan regex nil)
+    (scan regex "a" :start -1)
+    (scan regex "a" :start "zero")
+    (cl-regex-kit:full-match-p nil "a")
+    (all-matches regex nil)
+    (split regex nil)
+    (replace-first regex nil "b")
+    (replace-all regex nil "b")
+    (regex-set-matches regex-set nil)
+    (regex-set-matches regex-set "a" :start 2)
+    (regex-set-matches nil "a"))
    (let ((result (scan regex "a")))
-     (dolist (operation
-              (list
-               (lambda ()
-                 (match-start nil))
-               (lambda ()
-                 (match-end nil))
-               (lambda ()
-                 (match-string result nil))
-               (lambda ()
-                 (match-captures result nil))
-               (lambda ()
-                 (match-group-string result 0 nil))
-               (lambda ()
-                 (match-group-start result -1))
-               (lambda ()
-                 (match-group-end result 1))
-               (lambda ()
-                 (match-group-string result "missing" "a"))
-               (lambda ()
-                 (capture-location-start (regex-capture-locations regex) "zero"))))
-       (signals type-error (funcall operation))))))
+     (expect-signals-cases
+      type-error
+      (match-start nil)
+      (match-end nil)
+      (match-string result nil)
+      (match-captures result nil)
+      (match-group-string result 0 nil)
+      (match-group-start result -1)
+      (match-group-end result 1)
+      (match-group-string result "missing" "a")
+      (capture-location-start (regex-capture-locations regex) "zero")))))
 
 (it
  "constrains matching to an explicit end without changing input context"
@@ -151,19 +124,13 @@
    (expect (regex-set-match-p set "abz" :start 1 :end 2) :to-be-truthy)
    (expect (split (compile-regex ",") "a,b,c" :end 2) :to-equal '("a" "b,c"))
    (expect (replace-all b "abzb" "X" :end 2) :to-equal "aXzb")
-   (dolist (operation
-            (list
-             (lambda ()
-               (scan b "a" :end -1))
-             (lambda ()
-               (scan b "a" :end 2))
-             (lambda ()
-               (scan b "a" :start 1 :end 0))
-             (lambda ()
-               (scan b "a" :end "one"))
-             (lambda ()
-               (cl-regex-kit:full-match-p b "a" :end -1))))
-     (signals type-error (funcall operation))))
+   (expect-signals-cases
+    type-error
+    (scan b "a" :end -1)
+    (scan b "a" :end 2)
+    (scan b "a" :start 1 :end 0)
+    (scan b "a" :end "one")
+    (cl-regex-kit:full-match-p b "a" :end -1)))
  (let ((result (full-match (compile-regex "(a|ab)") "ab")))
    (expect result :to-be-truthy)
    (expect (match-string result "ab") :to-equal "ab")
@@ -173,52 +140,22 @@
    (expect result :to-be-truthy)
    (expect (match-end result) :to-equal 2))
  (expect (full-match (compile-regex "a|ab") "zab") :to-be nil)
- (flet ((octets (&rest values)
-          (make-array
-           (length values)
-           :element-type
-           '(unsigned-byte 8)
-           :initial-contents
-           values)))
-   (let ((dot (compile-byte-regex "."))
-         (snowman (octets #xe2 #x98 #x83)))
-     (expect (scan dot snowman :end 2) :to-be nil)
-     (expect (match-end (scan dot snowman :end 3)) :to-equal 3))))
-
-(it
- "reports regex-set cardinality without copying its source patterns"
- (let ((empty (compile-regex-set '() :size-limit 1))
-       (set (compile-regex-set '("cat" "dog")))
-       (byte-set (compile-byte-regex-set '("A"))))
-   (expect (regex-set-count empty) :to-equal 0)
-   (expect (regex-set-empty-p empty) :to-be-truthy)
-   (expect (regex-set-count set) :to-equal 2)
-   (expect (regex-set-empty-p set) :to-be nil)
-   (expect (regex-set-count byte-set) :to-equal 1)
-   (expect (regex-set-empty-p byte-set) :to-be nil)
-   (signals type-error (regex-set-count nil))
-   (signals type-error (regex-set-empty-p nil))))
-
-(it
- "validates compiler options for empty regex sets"
- (dolist (compiler (list #'compile-regex-set #'compile-byte-regex-set))
-   (signals error (funcall compiler '() :unknown-option t))
-   (signals type-error (funcall compiler '() :case-insensitive :enabled))
-   (signals type-error (funcall compiler '() :literal :enabled))
-   (signals type-error (funcall compiler '() :nest-limit -1))
-   (signals type-error (funcall compiler '() :size-limit 0))
-   (signals type-error (funcall compiler '() :line-terminator "newline"))
-   (signals type-error (funcall compiler '() :line-terminator (code-char #x80)))))
+ (let ((dot (compile-byte-regex "."))
+       (snowman (octets #xe2 #x98 #x83)))
+   (expect (scan dot snowman :end 2) :to-be nil)
+   (expect (match-end (scan dot snowman :end 3)) :to-equal 3)))
 
 (it
  "validates compiler options consistently for regexes"
- (dolist (compiler (list #'compile-regex #'compile-byte-regex))
-   (signals type-error (funcall compiler "a" :case-insensitive :enabled))
-   (signals type-error (funcall compiler "a" :literal :enabled))
-   (signals type-error (funcall compiler "a" :nest-limit -1))
-   (signals type-error (funcall compiler "a" :size-limit 0))
-   (signals type-error (funcall compiler "a" :line-terminator "newline"))
-   (signals type-error (funcall compiler "a" :line-terminator (code-char #x80)))))
+ (expect-signals-for-functions
+  type-error
+  (list #'compile-regex #'compile-byte-regex)
+  (funcall fn "a" :case-insensitive :enabled)
+  (funcall fn "a" :literal :enabled)
+  (funcall fn "a" :nest-limit -1)
+  (funcall fn "a" :size-limit 0)
+  (funcall fn "a" :line-terminator "newline")
+  (funcall fn "a" :line-terminator (code-char #x80))))
 
 (it
  "finds the shortest match at the leftmost start position"
@@ -240,60 +177,42 @@
    (expect (shortest-match (compile-byte-regex "A+") text) :to-equal 1)
    (expect (shortest-match-at (compile-byte-regex "A+") text 1) :to-equal 2)))
 
-(it
+(it-split-cases
  "splits with Rust-compatible split operations"
+ ","
+ (split "one,two," ("one" "two" ""))
+ (split-terminator "one,two," ("one" "two"))
+ (split-terminator "one,two" ("one" "two"))
+ (split-terminator "" (""))
+ (split-inclusive "one,two," ("one," "two,"))
+ (split-inclusive "one,two" ("one," "two"))
+ (split-inclusive "" (""))
+ (split-inclusive "one,two,three" ("one,two," "three") :start 4 :end 8)
+ (split-terminator "a,bX" ("a" "bX") :end 2)
+ (split-n "one,two,three" ("one" "two,three") 2)
+ (split-n "one,two,three" ("one,two,three") 1)
+ (split-n "one,two,three" nil 0)
+ (split-n "one,two,three" ("one,two" "three") 2 :start 4))
+
+(it
+ "rejects invalid split arguments"
  (let ((comma (compile-regex ",")))
-   (expect (split comma "one,two,") :to-equal '("one" "two" ""))
-   (expect (split-terminator comma "one,two,") :to-equal '("one" "two"))
-   (expect (split-terminator comma "one,two") :to-equal '("one" "two"))
-   (expect (split-terminator comma "") :to-equal '(""))
-   (expect (split-inclusive comma "one,two,") :to-equal '("one," "two,"))
-   (expect (split-inclusive comma "one,two") :to-equal '("one," "two"))
-   (expect (split-inclusive comma "") :to-equal '(""))
-   (expect
-    (split-inclusive comma "one,two,three" :start 4 :end 8)
-    :to-equal
-    '("one,two," "three"))
-   (expect
-    (split-terminator comma "a,bX" :end 2)
-    :to-equal
-    '("a" "bX"))
-   (expect (split-n comma "one,two,three" 2) :to-equal '("one" "two,three"))
-   (expect (split-n comma "one,two,three" 1) :to-equal '("one,two,three"))
-   (expect (split-n comma "one,two,three" 0) :to-equal nil)
-   (expect
-    (split-n comma "one,two,three" 2 :start 4)
-    :to-equal
-    '("one,two" "three"))
    (signals type-error (split-n comma "one,two" -1))
    (signals type-error (split-n comma "one,two" 1.5))
-   (dolist (operation
-            (list
-             (lambda ()
-               (split-n nil "one,two" 0))
-             (lambda ()
-               (split-n comma nil 0))
-             (lambda ()
-               (split-n comma "one,two" 0 :start -1))
-             (lambda ()
-               (split-n comma "one,two" 0 :timeout 0))
-             (lambda ()
-               (split-terminator nil "one,two"))
-             (lambda ()
-               (split-terminator comma nil))
-             (lambda ()
-               (split-inclusive nil "one,two"))
-             (lambda ()
-               (split-inclusive comma nil))
-             (lambda ()
-               (split-inclusive comma "one,two" :start -1))
-             (lambda ()
-               (split-inclusive comma "one,two" :end 8))
-             (lambda ()
-               (split-inclusive comma "one,two" :start 2 :end 1))
-             (lambda ()
-               (split-inclusive comma "one,two" :timeout 0))))
-     (signals type-error (funcall operation)))))
+   (expect-signals-cases
+    type-error
+    (split-n nil "one,two" 0)
+    (split-n comma nil 0)
+    (split-n comma "one,two" 0 :start -1)
+    (split-n comma "one,two" 0 :timeout 0)
+    (split-terminator nil "one,two")
+    (split-terminator comma nil)
+    (split-inclusive nil "one,two")
+    (split-inclusive comma nil)
+    (split-inclusive comma "one,two" :start -1)
+    (split-inclusive comma "one,two" :end 8)
+    (split-inclusive comma "one,two" :start 2 :end 1)
+    (split-inclusive comma "one,two" :timeout 0))))
 
 (it
  "validates replacement shapes when no replacement is performed"
@@ -301,192 +220,97 @@
        (byte-regex (compile-byte-regex "x"))
        (octets
         (make-array 1 :element-type '(unsigned-byte 8) :initial-contents '(97))))
-   (dolist (operation
-            (list
-             (lambda ()
-               (replace-first string-regex "a" 42))
-             (lambda ()
-               (replace-n string-regex "a" 42 0))
-             (lambda ()
-               (replace-first byte-regex octets "not octets"))
-             (lambda ()
-               (replace-n byte-regex octets "not octets" 0))))
-     (signals type-error (funcall operation)))))
+   (expect-signals-cases
+    type-error
+    (replace-first string-regex "a" 42)
+    (replace-n string-regex "a" 42 0)
+    (replace-first byte-regex octets "not octets")
+    (replace-n byte-regex octets "not octets" 0))))
 
 (it
  "handles zero-length matches once at each input position"
  (let ((empty (compile-regex "")))
-   (expect
-    (mapcar
-     (lambda (result)
-       (list (match-start result) (match-end result)))
-     (all-matches empty "ab"))
-    :to-equal
-    '((0 0) (1 1) (2 2)))
-   (expect
-    (mapcar
-     (lambda (result)
-       (list (match-start result) (match-end result)))
-     (all-matches empty "ab" :start 1))
-    :to-equal
-    '((1 1) (2 2)))
-   (expect (split empty "ab") :to-equal '("" "a" "b" ""))
-   (expect (split-terminator empty "ab") :to-equal '("" "a" "b"))
-   (expect (split-inclusive empty "ab") :to-equal '("" "a" "b"))
-   (expect (replace-first empty "ab" "-") :to-equal "-ab")
-   (expect (replace-n empty "ab" "-" 2) :to-equal "-a-b")
-   (expect (replace-all empty "ab" "-") :to-equal "-a-b-"))
- (flet ((octets (&rest values)
-          (make-array
-           (length values)
-           :element-type
-           '(unsigned-byte 8)
-           :initial-contents
-           values)))
-   (let ((empty (compile-byte-regex ""))
-         (text (octets 65 66)))
-     (expect
-      (mapcar
-       (lambda (result)
-         (list (match-start result) (match-end result)))
-       (all-matches empty text))
-      :to-equal
-      '((0 0) (1 1) (2 2)))
-     (expect
-      (mapcar
-       (lambda (result)
-         (list (match-start result) (match-end result)))
-       (all-matches empty text :start 1))
-      :to-equal
-      '((1 1) (2 2)))
-     (expect
-      (mapcar
-       (lambda (field)
-         (coerce field 'list))
-       (split empty (octets #xe2 #x98 #x83)))
-      :to-equal
-      '(nil (226) (152) (131) nil))
-     (expect
-      (mapcar
-       (lambda (field)
-         (coerce field 'list))
-       (split-terminator empty (octets #xe2 #x98 #x83)))
-      :to-equal
-      '(nil (226) (152) (131)))
-     (expect
-      (mapcar
-       (lambda (field)
-         (coerce field 'list))
-       (split-inclusive (compile-byte-regex ",") (octets 65 44 66 44)))
-      :to-equal
-      '((65 44) (66 44)))
-     (expect
-      (coerce (replace-all empty text (octets 45)) 'list)
-      :to-equal
-      '(45 65 45 66 45)))))
+   (expect-match-spans-cases
+    ((all-matches empty "ab") '((0 0) (1 1) (2 2)))
+    ((all-matches empty "ab" :start 1) '((1 1) (2 2))))
+   (expect-equal-cases
+    ((split empty "ab") '("" "a" "b" ""))
+    ((split-terminator empty "ab") '("" "a" "b"))
+    ((split-inclusive empty "ab") '("" "a" "b"))
+    ((replace-first empty "ab" "-") "-ab")
+    ((replace-n empty "ab" "-" 2) "-a-b")
+    ((replace-all empty "ab" "-") "-a-b-")))
+ (let ((empty (compile-byte-regex ""))
+       (text (octets 65 66)))
+   (expect-match-spans-cases
+    ((all-matches empty text) '((0 0) (1 1) (2 2)))
+    ((all-matches empty text :start 1) '((1 1) (2 2))))
+   (expect-list-of-octets-cases
+    ((split empty (octets #xe2 #x98 #x83)) '(nil (226) (152) (131) nil))
+    ((split-terminator empty (octets #xe2 #x98 #x83)) '(nil (226) (152) (131)))
+    ((split-inclusive (compile-byte-regex ",") (octets 65 44 66 44))
+     '((65 44) (66 44))))
+   (expect-octets-cases
+    ((replace-all empty text (octets 45)) '(45 65 45 66 45)))))
 
 (it
  "suppresses empty matches adjacent to preceding non-empty matches"
- (flet ((spans (regex text)
-          (mapcar
-           (lambda (result)
-             (list (match-start result) (match-end result)))
-           (all-matches regex text))))
-   (let ((star (compile-regex "a*")))
-     (expect (spans star "aba") :to-equal '((0 1) (2 3)))
-     (expect (spans star "ba") :to-equal '((0 0) (1 2)))
-     (let ((visited nil))
-       (do-matches
-        (result star "aba")
-        (push (list (match-start result) (match-end result)) visited))
-       (expect (nreverse visited) :to-equal '((0 1) (2 3))))
-     (expect (split star "aba") :to-equal '("" "b" ""))
-     (expect (replace-all star "aba" "-") :to-equal "-b-"))
-   (expect (spans (compile-regex "a*|b") "ab") :to-equal '((0 1) (2 2))))
- (flet ((octets (&rest values)
-          (make-array
-           (length values)
-           :element-type
-           '(unsigned-byte 8)
-           :initial-contents
-           values)))
-   (let ((star (compile-byte-regex "A*"))
-         (text (octets 65 66 65)))
-     (expect
-      (mapcar
-       (lambda (result)
-         (list (match-start result) (match-end result)))
-       (all-matches star text))
-      :to-equal
-      '((0 1) (2 3)))
-     (expect
-      (mapcar
-       (lambda (field)
-         (coerce field 'list))
-       (split star text))
-      :to-equal
-      '(nil (66) nil))
-     (expect
-      (coerce (replace-all star text (octets 45)) 'list)
-      :to-equal
-      '(45 66 45)))))
+ (let ((star (compile-regex "a*")))
+   (expect-match-spans-cases
+    ((all-matches star "aba") '((0 1) (2 3)))
+    ((all-matches star "ba") '((0 0) (1 2))))
+   (let ((visited nil))
+     (do-matches
+      (result star "aba")
+      (push (list (match-start result) (match-end result)) visited))
+     (expect (nreverse visited) :to-equal '((0 1) (2 3))))
+   (expect-equal-cases
+    ((split star "aba") '("" "b" ""))
+    ((replace-all star "aba" "-") "-b-")))
+ (expect-match-spans-cases
+  ((all-matches (compile-regex "a*|b") "ab") '((0 1) (2 2))))
+ (let ((star (compile-byte-regex "A*"))
+       (text (octets 65 66 65)))
+   (expect-match-spans-cases
+    ((all-matches star text) '((0 1) (2 3))))
+   (expect-list-of-octets-cases
+    ((split star text) '(nil (66) nil)))
+   (expect-octets-cases
+    ((replace-all star text (octets 45)) '(45 66 45)))))
 
 (it
  "enumerates overlapping matches at every candidate start"
- (flet ((spans (regex text &rest options)
-          (mapcar
-           (lambda (result)
-             (list (match-start result) (match-end result)))
-           (apply #'all-matches-overlapping regex text options))))
-   (let ((regex (compile-regex "aa")))
-     (expect (spans regex "aaaa") :to-equal '((0 2) (1 3) (2 4)))
-     (expect (spans regex "aaaa" :start 1 :end 4) :to-equal '((1 3) (2 4)))
-     (let ((visited nil))
-       (do-matches-overlapping
-        (result regex "aaaa")
-        (push (list (match-start result) (match-end result)) visited))
-       (expect (nreverse visited) :to-equal '((0 2) (1 3) (2 4)))))
-   (expect
-    (spans (compile-regex "") "ab")
-    :to-equal
-    '((0 0) (1 1) (2 2)))
-   (let ((captures nil)
-         (buffers nil))
-     (do-captures-overlapping
-      (locations (compile-regex "(aa)") "aaa")
-      (push
-       (list
-        (capture-location-start locations 0)
-        (capture-location-end locations 0)
-        (capture-location-start locations 1)
-        (capture-location-end locations 1))
-       captures)
-      (push locations buffers))
-     (expect (nreverse captures) :to-equal '((0 2 0 2) (1 3 1 3)))
-     (expect (apply #'eq buffers) :to-be-truthy)))
- (flet ((octets (&rest values)
-          (make-array
-           (length values)
-           :element-type
-           '(unsigned-byte 8)
-           :initial-contents
-           values)))
-   (let ((regex (compile-byte-regex "AA"))
-         (text (octets 65 65 65)))
-     (expect
-      (mapcar
-       (lambda (result)
-         (list (match-start result) (match-end result)))
-       (all-matches-overlapping regex text))
-      :to-equal
-      '((0 2) (1 3)))
-     (expect
-      (mapcar
-       (lambda (result)
-         (list (match-start result) (match-end result)))
-       (all-matches-overlapping (compile-byte-regex "") text))
-      :to-equal
-      '((0 0) (1 1) (2 2) (3 3))))))
+ (let ((regex (compile-regex "aa")))
+   (expect-match-spans-cases
+    ((all-matches-overlapping regex "aaaa") '((0 2) (1 3) (2 4)))
+    ((all-matches-overlapping regex "aaaa" :start 1 :end 4) '((1 3) (2 4))))
+   (let ((visited nil))
+     (do-matches-overlapping
+      (result regex "aaaa")
+      (push (list (match-start result) (match-end result)) visited))
+     (expect (nreverse visited) :to-equal '((0 2) (1 3) (2 4)))))
+ (expect-match-spans-cases
+  ((all-matches-overlapping (compile-regex "") "ab") '((0 0) (1 1) (2 2))))
+ (let ((captures nil)
+       (buffers nil))
+   (do-captures-overlapping
+    (locations (compile-regex "(aa)") "aaa")
+    (push
+     (list
+      (capture-location-start locations 0)
+      (capture-location-end locations 0)
+      (capture-location-start locations 1)
+      (capture-location-end locations 1))
+     captures)
+    (push locations buffers))
+   (expect (nreverse captures) :to-equal '((0 2 0 2) (1 3 1 3)))
+   (expect (apply #'eq buffers) :to-be-truthy))
+ (let ((regex (compile-byte-regex "AA"))
+       (text (octets 65 65 65)))
+   (expect-match-spans-cases
+    ((all-matches-overlapping regex text) '((0 2) (1 3)))
+    ((all-matches-overlapping (compile-byte-regex "") text)
+     '((0 0) (1 1) (2 2) (3 3))))))
 
 (it
  "iterates captures with one reusable offset buffer"
@@ -526,18 +350,20 @@
      optional-capture-offsets))
    (expect (nreverse optional-capture-offsets) :to-equal '((0 1) (nil nil)))))
 
+(it-replace-cases
+ "expands Rust-style replacement templates consistently for strings"
+ #'compile-regex
+ "(?<word>a)"
+ (replace-all "a" "$$${word}-$missing-${2}-$" "$a---$")
+ (replace-all "a" "$" "$")
+ (replace-all "a" "$wordx" "")
+ (replace-all "a" "${}" "")
+ (replace-all "a" "${word" "${word")
+ (replace-all "a" "$-" "$-"))
+
 (it
- "expands Rust-style replacement templates consistently"
+ "rejects invalid string replacement values"
  (let ((regex (compile-regex "(?<word>a)")))
-   (expect
-    (replace-all regex "a" "$$${word}-$missing-${2}-$")
-    :to-equal
-    "$a---$")
-   (expect (replace-all regex "a" "$") :to-equal "$")
-   (expect (replace-all regex "a" "$wordx") :to-equal "")
-   (expect (replace-all regex "a" "${}") :to-equal "")
-   (expect (replace-all regex "a" "${word") :to-equal "${word")
-   (expect (replace-all regex "a" "$-") :to-equal "$-")
    (signals type-error (replace-all regex "a" 42))
    (signals
     type-error
@@ -546,253 +372,112 @@
      "a"
      (lambda (result source)
        (declare (ignore result source))
-       42))))
- (let ((dotted (compile-regex "(?<a.b>x)"))
-       (unicode (compile-regex "(?<Δ>x)")))
-   (expect (replace-all dotted "x" "$a.b") :to-equal ".b")
-   (expect (replace-all dotted "x" "${a.b}") :to-equal "x")
-   (expect (replace-all unicode "x" "$Δ") :to-equal "$Δ")
-   (expect (replace-all unicode "x" "${Δ}") :to-equal "x"))
- (flet ((octets (&rest values)
-          (make-array
-           (length values)
-           :element-type
-           '(unsigned-byte 8)
-           :initial-contents
-           values)))
-   (let ((regex (compile-byte-regex "(?<word>A)")))
-     (expect
-      (coerce
-       (replace-all
-        regex
-        (octets 65)
-        (octets
-         #x24
-         #x24
-         #x24
-         #x7b
-         #x77
-         #x6f
-         #x72
-         #x64
-         #x7d
-         #x2d
-         #x24
-         #x6d
-         #x69
-         #x73
-         #x73
-         #x69
-         #x6e
-         #x67))
-       'list)
-      :to-equal
-      '(36 65 45))
-     (expect
-      (coerce
-       (replace-all regex (octets 65) (octets #x24 #x7b #x77 #x6f #x72 #x64))
-       'list)
-      :to-equal
-      '(36 123 119 111 114 100))
-     (expect
-      (coerce (replace-all regex (octets 65) (octets #x24 #x2d)) 'list)
-      :to-equal
-      '(36 45))
-     (expect
-      (coerce (replace-all regex (octets 65) (octets #x24)) 'list)
-      :to-equal
-      '(36))
-     (expect
-      (coerce (replace-all regex (octets 65) (octets #x24 #x7b #x7d)) 'list)
-      :to-equal
-      nil)
-     (expect
-      (coerce
-       (replace-all regex (octets 65) (octets #x24 #x7b #xff #x7d))
-       'list)
-      :to-equal
-      nil)
-     (expect
-      (coerce (replace-all regex (octets 65) (octets #x24 #xff)) 'list)
-      :to-equal
-      '(36 255))
-     (signals type-error (replace-all regex (octets 65) "not octets"))
-     (signals
-      type-error
-      (replace-all
-       regex
-       (octets 65)
-       (lambda (result source)
-         (declare (ignore result source))
-         "not octets"))))
-   (let ((dotted (compile-byte-regex "(?<a.b>x)")))
-     (expect
-      (coerce
-       (replace-all dotted (octets #x78) (octets #x24 #x61 #x2e #x62))
-       'list)
-      :to-equal
-      '(46 98))
-     (expect
-      (coerce
-       (replace-all dotted (octets #x78) (octets #x24 #x7b #x61 #x2e #x62 #x7d))
-       'list)
-      :to-equal
-      '(120)))))
+       42)))))
+
+(it-replace-cases
+ "resolves edge-case named replacement templates for strings"
+ #'compile-regex
+ "(?<a.b>x)"
+ (replace-all "x" "$a.b" ".b")
+ (replace-all "x" "${a.b}" "x"))
+
+(it-replace-cases
+ "keeps unicode replacement names literal unless braced"
+ #'compile-regex
+ "(?<Δ>x)"
+ (replace-all "x" "$Δ" "$Δ")
+ (replace-all "x" "${Δ}" "x"))
+
+(it-byte-replace-cases
+ "expands Rust-style replacement templates consistently for octet vectors"
+ #'compile-byte-regex
+ "(?<word>A)"
+ (replace-all
+  (octets 65)
+  (octets
+   #x24
+   #x24
+   #x24
+   #x7b
+   #x77
+   #x6f
+   #x72
+   #x64
+   #x7d
+   #x2d
+   #x24
+   #x6d
+   #x69
+   #x73
+   #x73
+   #x69
+   #x6e
+   #x67)
+  '(36 65 45))
+ (replace-all (octets 65) (octets #x24 #x7b #x77 #x6f #x72 #x64)
+              '(36 123 119 111 114 100))
+ (replace-all (octets 65) (octets #x24 #x2d) '(36 45))
+ (replace-all (octets 65) (octets #x24) '(36))
+ (replace-all (octets 65) (octets #x24 #x7b #x7d) nil)
+ (replace-all (octets 65) (octets #x24 #x7b #xff #x7d) nil)
+ (replace-all (octets 65) (octets #x24 #xff) '(36 255)))
 
 (it
- "rejects malformed regex-set declarations before compilation"
- (signals type-error (compile-regex-set 42))
- (signals type-error (compile-regex-set "a"))
- (signals type-error (compile-byte-regex-set "a"))
- (signals error (macroexpand-1 '(regex-set "a" :case-insensitive)))
- (signals error (macroexpand-1 '(regex-set "a" case-insensitive t)))
- (signals error (macroexpand-1 '(byte-regex-set "a" :case-insensitive)))
- (signals error (macroexpand-1 '(byte-regex-set "a" case-insensitive t)))
- (signals error (macroexpand-1 '(byte-regex-set "a" :case-insensitive enabled))))
+ "rejects invalid octet replacement values"
+ (let ((regex (compile-byte-regex "(?<word>A)")))
+   (signals type-error (replace-all regex (octets 65) "not octets"))
+   (signals
+    type-error
+    (replace-all
+     regex
+     (octets 65)
+     (lambda (result source)
+       (declare (ignore result source))
+       "not octets")))))
+
+(it-byte-replace-cases
+ "resolves edge-case named replacement templates for octet vectors"
+ #'compile-byte-regex
+ "(?<a.b>x)"
+ (replace-all (octets #x78) (octets #x24 #x61 #x2e #x62) '(46 98))
+ (replace-all (octets #x78)
+              (octets #x24 #x7b #x61 #x2e #x62 #x7d)
+              '(120)))
 
 (it
- "handles empty regex sets as empty match collections"
- (dolist (set
-          (list
-           (compile-regex-set '())
-           (compile-regex-set #())
-           (compile-byte-regex-set '())))
-   (expect
-    (regex-set-matches
-     set
-     (if (byte-regex-set-p set) (make-array 0 :element-type '(unsigned-byte 8))
-       "text"))
-    :to-equal
-    '())
-   (expect
-    (regex-set-match-p
-     set
-     (if (byte-regex-set-p set) (make-array 0 :element-type '(unsigned-byte 8))
-       "text"))
-    :to-be
-    nil)))
-
-(it
- "reuses regex-set result buffers without retaining stale matches"
- (let* ((set (compile-regex-set '("cat" "dog" "cat")))
-        (matches (make-array 3 :element-type 'bit :initial-element 1)))
-   (expect (regex-set-matches-into set matches "a cat") :to-be matches)
-   (expect (coerce matches 'list) :to-equal '(1 0 1))
-   (regex-set-matches-into set matches "a bird")
-   (expect (coerce matches 'list) :to-equal '(0 0 0))
-   (regex-set-matches-into set matches "cat dog" :start 4 :end 7)
-   (expect (coerce matches 'list) :to-equal '(0 1 0))
-   (expect (regex-set-matches-at set "cat dog" 4 :end 7) :to-equal '(1))
-   (expect (regex-set-match-at-p set "cat dog" 4 :end 7) :to-be-truthy)
-   (expect (regex-set-match-at-p set "cat dog" 7) :to-be nil)
-   (signals type-error (regex-set-matches-at set "cat" -1))
-   (signals type-error (regex-set-match-at-p set "cat" -1))
-   (signals type-error (regex-set-matches-into set #*00 "cat"))
-   (signals type-error (regex-set-matches-into set #(0 1 2) "cat"))
-   (signals type-error (regex-set-matches-into set matches nil))
-   (signals type-error (regex-set-matches-into set matches "cat" :start -1))
-   (signals type-error (regex-set-matches-into set matches "cat" :end 4))
-   (signals type-error (regex-set-matches-into set matches "cat" :timeout 0))))
-
-(it
- "finds the first regex-set member with deterministic tie-breaking"
- (let ((set (compile-regex-set '("dog" "cat" "c(at)"))))
-   (multiple-value-bind (index result)
-       (regex-set-search set "xxcat dog")
-     (expect index :to-be 1)
-     (expect (match-start result) :to-be 2)
-     (expect (match-string result "xxcat dog") :to-equal "cat"))
-   (multiple-value-bind (index result)
-       (regex-set-search-at set "xxcat dog" 6)
-     (expect index :to-be 0)
-     (expect (match-start result) :to-be 6))
-   (multiple-value-bind (index result)
-       (regex-set-search set "bird")
-     (expect index :to-be nil)
-     (expect result :to-be nil)))
- (let ((regex (compile-regex "cat")))
-   (expect (regex-search regex "xxcat") :to-be-truthy)
-   (expect (match-start (regex-search-at regex "xxcat" 2)) :to-be 2)
-   (expect (regex-search regex "bird") :to-be nil)))
-
-(it "routes advanced members through public regex-set APIs" (let* ((advanced (compile-regex "(?=a)a")) (set (compile-regex-set (quote ("a" "(?=a)a"))))) (expect (regex-advanced-p advanced) :to-be-truthy) (expect (regex-set-matches set "a") :to-equal (quote (0 1))) (expect (regex-set-matches-at set "xa" 1 :end 2) :to-equal (quote (0 1))) (expect (regex-set-match-at-p set "xa" 1 :end 2) :to-be-truthy))) (it "routes advanced members through byte regex-set APIs" (flet ((octets (&rest values) (make-array (length values) :element-type (quote (unsigned-byte 8)) :initial-contents values))) (let ((set (compile-byte-regex-set (quote ("A" "(?=A)A"))))) (expect (regex-set-matches set (octets 65)) :to-equal (quote (0 1))) (expect (regex-set-match-p set (octets 65)) :to-be-truthy))))
-
-(it
- "executes advanced-only regex sets through match and scan paths"
- (let ((set (compile-regex-set '("(?=a)a"))))
-   (expect (regex-set-matches set "a") :to-equal '(0))
-   (expect (regex-set-match-p set "a") :to-be-truthy)
-   (expect (regex-set-matches set "b") :to-equal nil)
-   (expect (regex-set-match-p set "b") :to-be nil)))
-
-(it
- "preserves every word-boundary form in merged regex-set execution"
- (dolist (case '(("\\bcat\\b" " cat ")
-                 ("\\Bcat\\B" "scatx")
-                 ("\\b{start}cat" " cat")
-                 ("cat\\b{end}" "cat ")
-                 ("\\b{start-half}cat" "!!cat")
-                 ("cat\\b{end-half}" "cat!!")))
-   (destructuring-bind (pattern text) case
-     (expect
-      (regex-set-matches (compile-regex-set (list pattern)) text)
-      :to-equal
-      '(0)))))
+ "exports one canonical search API for regular and fuzzy matching"
+ (expect (find-symbol "REGEX-SEARCH" '#:cl-regex-kit) :to-be nil)
+ (expect (find-symbol "REGEX-SEARCH-AT" '#:cl-regex-kit) :to-be nil)
+ (expect (find-symbol "FUZZY-SEARCH" '#:cl-regex-kit) :to-be nil)
+ (expect (find-symbol "FUZZY-SEARCH-AT" '#:cl-regex-kit) :to-be nil))
 
 (it
  "configures compilation through builder-style keyword options"
- (expect
-  (match-string
-   (scan (compile-regex "cat" :case-insensitive t) "--CAT--")
-   "--CAT--")
-  :to-equal
-  "CAT")
- (expect (scan (compile-regex "(?i)k") "K") :to-be-truthy)
- (expect (scan (compile-regex "(?i-u)k") "K") :to-be nil)
- (expect (scan (compile-regex "(?i)[k]") "K") :to-be-truthy)
- (expect (scan (compile-regex "(?i-u)[k]") "K") :to-be nil)
- (expect (scan (compile-regex "(?i-u)[K]") "k") :to-be nil)
- (expect
-  (scan (compile-regex "k" :case-insensitive t :unicode nil) "K")
-  :to-be
-  nil)
- (expect
-  (scan (compile-regex "[k]" :case-insensitive t :unicode nil) "K")
-  :to-be
-  nil)
- (expect
-  (match-string
-   (scan (compile-regex "^cat$" :multi-line t) (format nil "dog~%cat~%bird"))
-   (format nil "dog~%cat~%bird"))
-  :to-equal
-  "cat")
- (expect
-  (match-string
-   (scan (compile-regex "a.b" :dot-matches-new-line t) (format nil "a~%b"))
+ (expect-match-string-cases
+  ((scan (compile-regex "cat" :case-insensitive t) "--CAT--") "--CAT--" "CAT")
+  ((scan (compile-regex "^cat$" :multi-line t) (format nil "dog~%cat~%bird"))
+   (format nil "dog~%cat~%bird")
+   "cat")
+  ((scan (compile-regex "a.b" :dot-matches-new-line t) (format nil "a~%b"))
+   (format nil "a~%b")
    (format nil "a~%b"))
-  :to-equal
-  (format nil "a~%b"))
- (expect
-  (match-string (scan (compile-regex "a+" :swap-greed t) "aaa") "aaa")
-  :to-equal
-  "a")
- (expect
-  (match-string (scan (compile-regex "a b" :ignore-whitespace t) "ab") "ab")
-  :to-equal
-  "ab")
- (expect
-  (match-string (scan (compile-regex "\\w+" :unicode nil) "éclair") "éclair")
-  :to-equal
-  "clair")
- (expect (scan (compile-regex "." :crlf t) (string #\Return)) :to-be nil)
- (expect (scan (compile-regex "." :line-terminator #\;) ";") :to-be nil)
- (expect
+  ((scan (compile-regex "a+" :swap-greed t) "aaa") "aaa" "a")
+  ((scan (compile-regex "a b" :ignore-whitespace t) "ab") "ab" "ab")
+  ((scan (compile-regex "\\w+" :unicode nil) "éclair") "éclair" "clair"))
+ (expect-truthy-cases
+  (scan (compile-regex "(?i)k") "K")
+  (scan (compile-regex "(?i)[k]") "K")
   (scan (compile-regex "." :crlf t :line-terminator #\;) ";")
-  :to-be-truthy)
- (expect
-  (scan (compile-regex "." :crlf t :line-terminator #\;) (string #\Return))
-  :to-be
-  nil)
+  (scan (compile-regex "a" :size-limit 4) "a"))
+ (expect-falsy-cases
+  (scan (compile-regex "(?i-u)k") "K")
+  (scan (compile-regex "(?i-u)[k]") "K")
+  (scan (compile-regex "(?i-u)[K]") "k")
+  (scan (compile-regex "k" :case-insensitive t :unicode nil) "K")
+  (scan (compile-regex "[k]" :case-insensitive t :unicode nil) "K")
+  (scan (compile-regex "." :crlf t) (string #\Return))
+  (scan (compile-regex "." :line-terminator #\;) ";")
+  (scan (compile-regex "." :crlf t :line-terminator #\;) (string #\Return)))
  (expect
   (match-string
    (scan
@@ -817,103 +502,56 @@
      crlf-text)
     :to-equal
     "right"))
- (expect
+ (expect-falsy-cases
   (scan
    (compile-regex "^right$" :multi-line t :crlf t :line-terminator #\;)
-   "left;right;tail")
-  :to-be
-  nil)
- (expect (scan (compile-regex "a" :size-limit 4) "a") :to-be-truthy)
- (signals regex-syntax-error (compile-regex "a" :size-limit 3))
- (signals regex-syntax-error (compile-regex "a{20}" :size-limit 5))
- (signals regex-syntax-error (compile-regex-set '("a" "b") :size-limit 9))
- (signals type-error (compile-regex "a" :size-limit 0))
- (signals regex-syntax-error (compile-regex "((a))" :nest-limit 1))
- (signals type-error (compile-regex "a" :nest-limit -1))
- (signals type-error (compile-regex "a" :line-terminator "newline")))
+   "left;right;tail"))
+ (expect-signals-cases
+     regex-syntax-error
+   (compile-regex "a" :size-limit 3)
+   (compile-regex "a{20}" :size-limit 5)
+   (compile-regex-set '("a" "b") :size-limit 9)
+   (compile-regex "((a))" :nest-limit 1))
+ (expect-signals-cases
+     type-error
+   (compile-regex "a" :size-limit 0)
+   (compile-regex "a" :nest-limit -1)
+   (compile-regex "a" :line-terminator "newline")))
 
-(it
- "matches octet vectors through the byte regex-set API"
- (flet ((octets (&rest values)
-          (make-array
-           (length values)
-           :element-type
-           '(unsigned-byte 8)
-           :initial-contents
-           values)))
-   (let ((set (compile-byte-regex-set '("A" "\\C" "Z"))))
-     (expect (regex-set-p set) :to-be-truthy)
-     (expect (byte-regex-set-p set) :to-be-truthy)
-     (expect (byte-regex-set-p nil) :to-be nil)
-     (expect (regex-set-matches set (octets #xff 65 #x80)) :to-equal '(0 1))
-     (expect (regex-set-match-p set (octets #xff)) :to-be-truthy)
-     (signals type-error (regex-set-matches set "A"))
-     (signals type-error (regex-set-matches set (octets 65) :start 2))
-     (signals type-error (compile-byte-regex-set 42)))
-   (expect
-    (regex-set-matches
-     (compile-byte-regex-set '("\\bA" "^A$") :multi-line t :crlf t)
-     (octets 65))
-    :to-equal
-    '(0 1))
-   (expect
-    (regex-set-matches
-     (compile-byte-regex-set '("^B$") :multi-line t :crlf t)
-     (octets 65 13 10 66 13 10))
-    :to-equal
-    '(0))
-   (expect
-    (regex-set-matches
-     (compile-byte-regex-set '("\\p{L}" "(?-u:\\xFF)"))
-     (octets #xff #xc3 #xa9))
-    :to-equal
-    '(0 1)))
- (let ((set (byte-regex-set "A" "\\C")))
-   (expect
-    (regex-set-matches
-     set
-     (make-array 1 :element-type '(unsigned-byte 8) :initial-contents '(65)))
-    :to-equal
-    '(0 1))))
-
-(it
+(it-replace-cases
  "limits replacements with replace-n"
+ #'compile-regex
+ "a"
+ (replace-n "aaaa" "b" "bbaa" 2)
+ (replace-n "aaaa" "b" "aaaa" 0))
+
+(it
+ "validates replace-n limits and replacement callback behavior"
  (let ((regex (compile-regex "a")))
-   (expect (replace-n regex "aaaa" "b" 2) :to-equal "bbaa")
-   (expect (replace-n regex "aaaa" "b" 0) :to-equal "aaaa")
-   (signals type-error (replace-n regex "aaaa" "b" -1))
-   (signals type-error (replace-n regex "aaaa" "b" "2"))
+   (expect-signals-cases
+    type-error
+    (replace-n regex "aaaa" "b" -1)
+    (replace-n regex "aaaa" "b" "2")
+    (replace-n regex "aaaa" nil 0))
    (signals error (replace-n regex "a" "b" 0 :start 2))
    (let ((calls 0))
-     (expect
-      (replace-n
-       regex
-       "aaaa"
-       (lambda (result source)
-         (declare (ignore result source))
-         (incf calls)
-         "b")
-       2)
-      :to-equal
-      "bbaa")
-     (expect calls :to-equal 2))
-   (signals type-error (replace-n regex "aaaa" nil 0))))
+     (expect-equal-cases
+      ((replace-n
+        regex
+        "aaaa"
+        (lambda (result source)
+          (declare (ignore result source))
+          (incf calls)
+          "b")
+        2)
+       "bbaa")
+      (calls 2)))))
 
-(it
+(it-byte-replace-cases
  "limits octet-vector replacements with replace-n"
- (flet ((octets (&rest values)
-          (make-array
-           (length values)
-           :element-type
-           (quote (unsigned-byte 8))
-           :initial-contents
-           values)))
-   (expect
-    (coerce
-     (replace-n (compile-byte-regex "A") (octets 65 66 65) (octets 0) 1)
-     (quote list))
-    :to-equal
-    (quote (0 66 65)))))
+ #'compile-byte-regex
+ "A"
+ (replace-n (octets 65 66 65) (octets 0) '(0 66 65) 1))
 
 (it-property
  "escaped generated literals retain exact full-match semantics"
@@ -936,22 +574,6 @@
    (expect
     (cl-regex-kit:full-match-p (compile-regex (format nil "a{~D}" count)) text)
     :to-be-truthy)))
-
-(it-property
- "merged regex sets agree with their member scans for generated input"
- ((text (gen-string :min-length 0 :max-length 48 :alphabet "ab\n"))
-  (requested-start (gen-integer :min 0 :max 48)))
- (let* ((patterns '("a+" "b+" "ab" "ba"))
-        (start (min requested-start (length text)))
-        (expected
-         (loop for pattern in patterns
-               for index from 0
-               when (scan (compile-regex pattern) text :start start)
-                 collect index)))
-   (expect
-    (regex-set-matches (compile-regex-set patterns) text :start start)
-    :to-equal
-    expected)))
 
 (it-property
  "streaming and collected non-overlapping matches agree"
@@ -1022,103 +644,3 @@
   cl-regex-kit-error
   (error (quote regex-syntax-error) :pattern "(" :reason "unclosed group"))
  (signals cl-regex-kit-error (error (quote regex-timeout) :seconds 1)))
-
-(it
- "supports bounded fuzzy matching for regular and byte regexes"
- (let ((regex (compile-regex "cat")))
-   (let ((substitution (fuzzy-scan regex "cot")))
-     (expect (match-start substitution) :to-be 0)
-     (expect (match-end substitution) :to-be 3)
-     (expect (match-edit-distance substitution) :to-be 1)
-     (expect (match-string substitution "cot") :to-equal "cot"))
-   (let ((deletion (fuzzy-scan regex "ct")))
-     (expect (match-start deletion) :to-be 0)
-     (expect (match-end deletion) :to-be 2)
-     (expect (match-edit-distance deletion) :to-be 1))
-   (let ((insertion (fuzzy-scan regex "cxt")))
-     (expect (match-start insertion) :to-be 0)
-     (expect (match-end insertion) :to-be 3)
-     (expect (match-edit-distance insertion) :to-be 1))
-   (let ((tie (fuzzy-scan (compile-regex "[ab]") "c")))
-     (expect (match-start tie) :to-be 0)
-     (expect (match-end tie) :to-be 0)
-     (expect (match-edit-distance tie) :to-be 1))
-   (expect (fuzzy-scan regex "cot" :max-edits 0) :to-be nil)
-   (let ((exact (scan regex "cat")))
-     (expect (match-edit-distance exact) :to-be 0))
-   (let ((captured (fuzzy-scan (compile-regex "(c)(at)") "cot")))
-     (expect (match-group-string captured 1 "cot") :to-equal "c")
-     (expect (match-group-string captured 2 "cot") :to-equal "ot"))
-   (expect (match-start (fuzzy-search regex "xxcot")) :to-be 2)
-   (expect (match-start (fuzzy-search-at regex "xxcot" 2)) :to-be 2)
-   (expect (match-start (fuzzy-match "cat" "xxcot")) :to-be 2))
- (flet ((octets (&rest values)
-          (make-array
-           (length values)
-           :element-type
-           '(unsigned-byte 8)
-           :initial-contents
-           values)))
-   (let* ((text (octets 99 111 116))
-          (result (byte-fuzzy-match "cat" text)))
-     (expect (match-edit-distance result) :to-be 1)
-     (expect (coerce (match-string result text) 'list)
-             :to-equal
-             '(99 111 116)))))
-
-(it
- "covers fuzzy NFA control flow and input-unit boundaries"
- (let ((crlf (format nil "~C~C" #\Return #\Newline)))
-   (let ((result (fuzzy-scan (compile-regex "\\R") crlf)))
-     (expect (match-end result) :to-be 2)
-     (expect (match-edit-distance result) :to-be 0))
-   (let ((result (fuzzy-scan (compile-regex "\\R" :never-newline t) crlf)))
-     (expect (match-end result) :to-be 0)
-     (expect (match-edit-distance result) :to-be 1)))
- (let ((anchored (fuzzy-scan (compile-regex "^a") "ba")))
-   (expect (match-start anchored) :to-be 0)
-   (expect (match-end anchored) :to-be 0)
-   (expect (match-edit-distance anchored) :to-be 1))
- (let ((alternation (fuzzy-scan (compile-regex "a|b") "c"))
-       (quantified (fuzzy-scan (compile-regex "a*") "bbb")))
-   (expect (match-edit-distance alternation) :to-be 1)
-   (expect (match-end quantified) :to-be 0)
-   (expect (match-edit-distance quantified) :to-be 0))
- (expect (match-edit-distance
-          (fuzzy-match (compile-regex "cat") "cot"))
-         :to-be 1)
- (expect (match-start (fuzzy-scan-at (compile-regex "cat") "xxcot" 2))
-         :to-be 2)
- (flet ((octets (&rest values)
-          (make-array
-           (length values)
-           :element-type
-           '(unsigned-byte 8)
-           :initial-contents
-           values)))
-   (let* ((unicode-regex (compile-byte-regex "." :unicode t))
-          (valid (octets 195 169))
-          (invalid (octets 255))
-          (compiled (compile-byte-regex "cat"))
-          (compiled-text (octets 99 111 116)))
-     (let ((result (fuzzy-scan unicode-regex valid)))
-       (expect (match-end result) :to-be 2)
-       (expect (match-edit-distance result) :to-be 0))
-     (expect (match-edit-distance
-              (fuzzy-scan unicode-regex valid :end 1))
-             :to-be 1)
-     (expect (match-edit-distance (fuzzy-scan unicode-regex invalid))
-             :to-be 1)
-     (expect (match-edit-distance (byte-fuzzy-match compiled compiled-text))
-             :to-be 1))))
-
-(it
- "rejects unsupported fuzzy dialects and enforces its state budget"
- (signals
-  fuzzy-match-unsupported
-  (fuzzy-scan (compile-regex "(?=a)a") "a"))
- (signals
-  fuzzy-match-limit-error
-  (fuzzy-scan (compile-regex "abc") "xyz" :state-limit 1))
- (signals type-error (fuzzy-scan (compile-regex "a") "a" :max-edits -1))
- (signals type-error (fuzzy-scan (compile-regex "a") "a" :state-limit 0)))

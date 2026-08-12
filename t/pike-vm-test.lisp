@@ -143,26 +143,19 @@
 
 (it
   "preserves UTF-8 octet capture and set boundaries"
-  (flet ((octets (&rest values)
-           (make-array
-          (length values)
-          :element-type
-          (quote (unsigned-byte 8))
-          :initial-contents
-          values)))
-    (let* ((text (octets #xff #xc3 #xa9 #xfe))
-           (result (scan (compile-byte-regex "(\\p{L})") text :start 1 :end 3))
-           (set (compile-byte-regex-set (quote ("\\p{L}" "A")))))
-      (expect (match-start result) :to-equal 1)
-      (expect (match-end result) :to-equal 3)
-      (expect (match-group-start result 1) :to-equal 1)
-      (expect (match-group-end result 1) :to-equal 3)
-      (expect
-        (coerce (match-group-string result 1 text) (quote list))
-        :to-equal
-        (quote (#xc3 #xa9)))
-      (expect (regex-set-matches set text :start 1 :end 3) :to-equal (quote (0)))
-      (expect (regex-set-match-p set text :start 1 :end 3) :to-be-truthy))))
+  (let* ((text (octets #xff #xc3 #xa9 #xfe))
+         (result (scan (compile-byte-regex "(\\p{L})") text :start 1 :end 3))
+         (set (compile-byte-regex-set (quote ("\\p{L}" "A")))))
+    (expect (match-start result) :to-equal 1)
+    (expect (match-end result) :to-equal 3)
+    (expect (match-group-start result 1) :to-equal 1)
+    (expect (match-group-end result 1) :to-equal 3)
+    (expect
+      (coerce (match-group-string result 1 text) (quote list))
+      :to-equal
+      (quote (#xc3 #xa9)))
+    (expect (regex-set-matches set text :start 1 :end 3) :to-equal (quote (0)))
+    (expect (regex-set-match-p set text :start 1 :end 3) :to-be-truthy)))
 
 (progn
   (it
@@ -335,19 +328,12 @@
     (expect (regex-set-match-p set "anything") :to-be nil))
   (let ((set (compile-regex-set (quote ("^b$" "^z$")) :multi-line t)))
     (expect (regex-set-matches set (format nil "a~%b~%c")) :to-equal (quote (0))))
-  (flet ((octets (&rest bytes)
-           (make-array
-          (length bytes)
-          :element-type
-          (quote (unsigned-byte 8))
-          :initial-contents
-          bytes)))
-    (let ((text (octets #xC3 #xA9 #x61))
-          (set (compile-byte-regex-set (quote ("\\p{L}" "a")))))
-      (expect (regex-set-matches set text :end 1) :to-equal nil)
-      (expect (regex-set-matches set text :end 2) :to-equal (quote (0)))
-      ;; Both members match: "a" (U+0061) is itself a Unicode Letter, so
-      ;; \p{L} (pattern 0) matches it exactly as the literal "a" (pattern 1)
-      ;; does -- byte-mode \p{L} decodes and classifies the UTF-8 scalar at
-      ;; each position rather than treating multi-byte sequences specially.
-      (expect (regex-set-matches set text :start 2 :end 3) :to-equal (quote (0 1))))))
+  (let ((text (octets #xC3 #xA9 #x61))
+        (set (compile-byte-regex-set (quote ("\\p{L}" "a")))))
+    (expect (regex-set-matches set text :end 1) :to-equal nil)
+    (expect (regex-set-matches set text :end 2) :to-equal (quote (0)))
+    ;; Both members match: "a" (U+0061) is itself a Unicode Letter, so
+    ;; \p{L} (pattern 0) matches it exactly as the literal "a" (pattern 1)
+    ;; does -- byte-mode \p{L} decodes and classifies the UTF-8 scalar at
+    ;; each position rather than treating multi-byte sequences specially.
+    (expect (regex-set-matches set text :start 2 :end 3) :to-equal (quote (0 1)))))

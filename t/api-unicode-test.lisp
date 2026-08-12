@@ -41,17 +41,6 @@
   (let ((result (scan (compile-regex "(a)(b)?") "a")))
     (unless (equalp (match-captures result "a") #("a" "a" nil))
       (error "MATCH-CAPTURES did not preserve a missing optional capture")))
-  (dolist (case '(("a" 1)
-                  ("(a)|(b)" 2)
-                  ("(a)(b)|(c)(d)" 3)
-                  ("(b)+" 2)
-                  ("(?:a?)*" 1)
-                  ("(a)|b" nil)
-                  ("a|(b)" nil)
-                  ("(b)*" nil)
-                  ("((a)|b)" nil)))
-    (destructuring-bind (pattern expected) case
-      (expect (regex-static-capture-count (compile-regex pattern)) :to-equal expected)))
   (expect (regex-static-capture-count (compile-byte-regex "(a)|(b)"))
           :to-equal 2)
   (signals type-error (regex-capture-names nil))
@@ -67,6 +56,19 @@
     (expect (replace-first regex "abc" "${Δ.part[2]}") :to-equal "abc"))
   (signals regex-syntax-error
     (compile-regex (format nil "(?<a~Cb>abc)" (code-char #x203f)))))
+
+(it-each (("a" 1)
+          ("(a)|(b)" 2)
+          ("(a)(b)|(c)(d)" 3)
+          ("(b)+" 2)
+          ("(?:a?)*" 1)
+          ("(a)|b" nil)
+          ("a|(b)" nil)
+          ("(b)*" nil)
+          ("((a)|b)" nil))
+    "computes static capture count for ~S"
+    (pattern expected)
+  (expect (regex-static-capture-count (compile-regex pattern)) :to-equal expected))
 
 (it
   "supports Unicode shorthands, properties, and word boundaries by default"
@@ -124,16 +126,19 @@
   (expect "é" :to-match-regex (compile-regex "(?-u:é)"))
   (expect "word_42" :to-match-regex (compile-regex "(?-u:\\w+)"))
   (expect "a" :to-match-regex (compile-regex "(?-u:[a])"))
-  (dolist (pattern '("(?-u:\\xE9)"
-                     "(?-u:\\351)"
-                     "(?-u:[é])"
-                     "(?-u:[^a])"
-                     "(?-u:[\\p{L}])"
-                     "(?-u:\\D)"
-                     "(?-u:.)"))
-    (signals regex-syntax-error (compile-regex pattern)))
   (expect (make-array 1 :element-type '(unsigned-byte 8) :initial-contents '(233))
           :to-match-regex (compile-byte-regex "(?-u:\\xE9)")))
+
+(it-each (("(?-u:\\xE9)")
+          ("(?-u:\\351)")
+          ("(?-u:[é])")
+          ("(?-u:[^a])")
+          ("(?-u:[\\p{L}])")
+          ("(?-u:\\D)")
+          ("(?-u:.)"))
+    "rejects Unicode-unsafe byte-scope pattern ~S outside the bytes API"
+    (pattern)
+  (signals regex-syntax-error (compile-regex pattern)))
 
 (it
   "rejects non-scalar Common Lisp characters at the Unicode boundary"
@@ -162,97 +167,103 @@
 
 (it
   "encodes raw byte-scope source literals as UTF-8"
-  (flet ((octets (&rest values)
-           (make-array (length values) :element-type '(unsigned-byte 8)
-                       :initial-contents values)))
-    (expect (octets #xc3 #xa9) :to-match-regex (compile-byte-regex "(?-u:é)"))
-    (expect-not (octets #xe9) :to-match-regex (compile-byte-regex "(?-u:é)"))
-    (expect (octets #xe2 #x98 #x83) :to-match-regex (compile-byte-regex "(?-u:☃)"))
-    (expect (octets #xc3 #xa9) :to-match-regex (compile-byte-regex "(?-u:\\x{E9})"))
-    (expect (octets #xc3 #xa9) :to-match-regex (compile-byte-regex "(?-u:\\u00E9)"))
-    (expect (octets #xe2 #x98 #x83)
-            :to-match-regex (compile-byte-regex "(?-u:\\U{2603})"))
-    (expect-not (octets #xc3 #x89) :to-match-regex (compile-byte-regex "(?i-u:é)"))
-    (expect (octets #xe9) :to-match-regex (compile-byte-regex "(?-u:\\xE9)"))
-    (expect (octets #xe9) :to-match-regex (compile-byte-regex "(?-u:[\\xE9])"))
-    (expect (octets #x61) :to-match-regex (compile-byte-regex "(?-u:[\\u0061])"))
-    (expect (octets #x7f) :to-match-regex (compile-byte-regex "(?-u:[\\x{7F}])"))
-    (signals regex-syntax-error (compile-byte-regex "(?-u:[é])"))
-    (signals regex-syntax-error (compile-byte-regex "(?-u:[☃])"))
-      (signals regex-syntax-error (compile-byte-regex "(?-u:[\\x{E9}])"))
-      (signals regex-syntax-error (compile-byte-regex "(?-u:[\\u{E9}])"))))
+  (expect (octets #xc3 #xa9) :to-match-regex (compile-byte-regex "(?-u:é)"))
+  (expect-not (octets #xe9) :to-match-regex (compile-byte-regex "(?-u:é)"))
+  (expect (octets #xe2 #x98 #x83) :to-match-regex (compile-byte-regex "(?-u:☃)"))
+  (expect (octets #xc3 #xa9) :to-match-regex (compile-byte-regex "(?-u:\\x{E9})"))
+  (expect (octets #xc3 #xa9) :to-match-regex (compile-byte-regex "(?-u:\\u00E9)"))
+  (expect (octets #xe2 #x98 #x83)
+          :to-match-regex (compile-byte-regex "(?-u:\\U{2603})"))
+  (expect-not (octets #xc3 #x89) :to-match-regex (compile-byte-regex "(?i-u:é)"))
+  (expect (octets #xe9) :to-match-regex (compile-byte-regex "(?-u:\\xE9)"))
+  (expect (octets #xe9) :to-match-regex (compile-byte-regex "(?-u:[\\xE9])"))
+  (expect (octets #x61) :to-match-regex (compile-byte-regex "(?-u:[\\u0061])"))
+  (expect (octets #x7f) :to-match-regex (compile-byte-regex "(?-u:[\\x{7F}])"))
+  (signals regex-syntax-error (compile-byte-regex "(?-u:[é])"))
+  (signals regex-syntax-error (compile-byte-regex "(?-u:[☃])"))
+  (signals regex-syntax-error (compile-byte-regex "(?-u:[\\x{E9}])"))
+  (signals regex-syntax-error (compile-byte-regex "(?-u:[\\u{E9}])")))
 
-(it "decodes valid UTF-8 scalars and rejects malformed byte sequences"
-  (flet ((octets (&rest values)
-           (make-array (length values) :element-type '(unsigned-byte 8)
-                       :initial-contents values))
-         (decode-at (text position)
-           (multiple-value-list (cl-regex-kit::utf8-character-at text position))))
-    (dolist (case `(((65) 0 (#\A 1 t))
-                    ((195 169) 0 (,(code-char #x00e9) 2 t))
-                    ((226 152 131) 0 (,(code-char #x2603) 3 t))
-                    ((240 159 152 128) 0 (,(code-char #x1f600) 4 t))))
-      (destructuring-bind (values position expected) case
-        (expect (decode-at (apply #'octets values) position) :to-equal expected)))
-    (dolist (values '((192 128)
-                      (128)
-                      (194)
-                      (195 40)
-                      (224 159 128)
-                      (226 130)
-                      (226 40 129)
-                      (237 160 128)
-                      (240 143 128 128)
-                      (240 159 152)
-                      (240 159 40 128)
-                      (240 159 152 40)
-                      (244 144 128 128)
-                      (245 128 128 128)))
-      (expect (decode-at (apply #'octets values) 0) :to-equal '(nil)))
-    (expect (decode-at (octets #x61) 1) :to-equal '(nil))
-    (expect (multiple-value-list
-             (cl-regex-kit::utf8-character-before (octets 195 169) 2))
-            :to-equal (list (code-char #x00e9) 0 t))
-    (let ((text (octets #x61 #xc3 #xa9)))
-      (expect (cl-regex-kit::byte-unicode-non-boundary-position-p text 1)
-              :to-be-truthy)
-      (expect (cl-regex-kit::byte-unicode-non-boundary-position-p text 2)
-              :to-be-null)
-      (expect (cl-regex-kit::byte-unicode-non-boundary-position-p text 3)
-              :to-be-truthy))))
+(it
+ "decodes valid UTF-8 scalars consistently with cl-codec-kit fixtures"
+ (dolist (text '("A" "é" "☃" "😀"))
+   (let ((octets (utf8-octets text)))
+     (expect (multiple-value-list
+              (cl-regex-kit::utf8-character-at octets 0))
+             :to-equal
+             (list (char text 0) (length octets) t))
+     (expect (octets-to-string octets :encoding :utf-8)
+             :to-equal
+             text))))
 
-(it "decodes UTF-8 scalars backward without accepting malformed boundaries"
-  (flet ((octets (&rest values)
-           (make-array (length values)
-                       :element-type (quote (unsigned-byte 8))
-                       :initial-contents values))
-         (decode-before (text position)
-           (multiple-value-list
-            (cl-regex-kit::utf8-character-before text position))))
-    (dolist (case
-             (list
-              (list (list 65) 1 (list #\A 0 t))
-              (list (list 195 169) 2 (list (code-char #x00e9) 0 t))
-              (list (list 226 152 131) 3 (list (code-char #x2603) 0 t))
-              (list (list 240 159 152 128) 4
-                    (list (code-char #x1f600) 0 t))))
-      (destructuring-bind (values position expected) case
-        (expect (decode-before (apply (function octets) values) position)
-                :to-equal expected)))
-    (dolist (case
-             (list
-              (list (list 128) 1)
-              (list (list 194) 1)
-              (list (list 195 169) 1)
-              (list (list 97 128) 2)
-              (list (list 226 130) 2)
-              (list (list 240 159 152) 3)))
-      (destructuring-bind (values position) case
-        (expect (decode-before (apply (function octets) values) position)
-                :to-equal (list nil nil nil))))
-    (let ((text (octets #x61 #xc3 #xa9)))
-      (expect (decode-before text 0) :to-equal (list nil nil nil))
-      (expect (decode-before text 4) :to-equal (list nil nil nil)))))
+(it-utf8-decode-at-cases
+ "rejects malformed UTF-8 byte sequences when decoding forward"
+ (((192 128) 0 (nil))
+  ((128) 0 (nil))
+  ((194) 0 (nil))
+  ((195 40) 0 (nil))
+  ((224 159 128) 0 (nil))
+  ((226 130) 0 (nil))
+  ((226 40 129) 0 (nil))
+  ((237 160 128) 0 (nil))
+  ((240 143 128 128) 0 (nil))
+  ((240 159 152) 0 (nil))
+  ((240 159 40 128) 0 (nil))
+  ((240 159 152 40) 0 (nil))
+  ((244 144 128 128) 0 (nil))
+ ((245 128 128 128) 0 (nil))
+  ((97) 1 (nil))))
+
+(it
+ "preserves UTF-8 non-boundary metadata across forward and backward decoding"
+ (expect (multiple-value-list
+          (cl-regex-kit::utf8-character-before (utf8-octets "é") 2))
+         :to-equal
+         (list (code-char #x00e9) 0 t))
+ (let ((text (utf8-octets "aé")))
+   (expect (cl-regex-kit::byte-unicode-non-boundary-position-p text 1)
+           :to-be-truthy)
+   (expect (cl-regex-kit::byte-unicode-non-boundary-position-p text 2)
+           :to-be-null)
+   (expect (cl-regex-kit::byte-unicode-non-boundary-position-p text 3)
+           :to-be-truthy)))
+
+(it
+ "decodes UTF-8 scalars backward without accepting malformed boundaries"
+ (dolist (text '("A" "é" "☃" "😀"))
+   (let ((octets (utf8-octets text)))
+     (expect (multiple-value-list
+              (cl-regex-kit::utf8-character-before octets (length octets)))
+             :to-equal
+             (list (char text 0) 0 t))
+     (expect (octets-to-string octets :encoding :utf-8)
+             :to-equal
+             text)))
+ (dolist (case '(((128) 1 (nil nil nil))
+  ((194) 1 (nil nil nil))
+  ((195 169) 1 (nil nil nil))
+  ((97 128) 2 (nil nil nil))
+  ((226 130) 2 (nil nil nil))
+  ((240 159 152) 3 (nil nil nil))))
+   (destructuring-bind (octets-values position expected) case
+     (expect (multiple-value-list
+              (cl-regex-kit::utf8-character-before
+               (apply #'octets octets-values)
+               position))
+             :to-equal
+             expected))))
+
+(it
+ "rejects out-of-range backward UTF-8 decoding positions"
+ (let ((text (octets #x61 #xc3 #xa9)))
+   (expect (multiple-value-list
+            (cl-regex-kit::utf8-character-before text 0))
+           :to-equal
+           (list nil nil nil))
+   (expect (multiple-value-list
+            (cl-regex-kit::utf8-character-before text 4))
+           :to-equal
+           (list nil nil nil))))
 
 
 (it "evaluates composed character and byte class matchers"
@@ -270,99 +281,90 @@
             :to-be-truthy)
     (expect (cl-regex-kit::matcher-matches-p `(:negate ,ranges) #\z)
             :to-be-truthy)
-    (signals error (cl-regex-kit::matcher-matches-p '(:unknown) #\a)))
-  (let ((ranges '(:ranges ((#\a . #\c)))))
-    (dolist (case `((,ranges 98 t)
-                    ((:union ,ranges) 98 t)
-                    ((:intersection ,ranges (:ranges ((98 . 99)))) 98 t)
-                    ((:difference ,ranges (:ranges ((98 . 98)))) 97 t)
-                    ((:symmetric-difference ,ranges (:ranges ((98 . 100)))) 97 t)
-                    ((:negate ,ranges) 122 t)
-                    ((:unknown) 97 nil)))
-      (destructuring-bind (matcher octet expected) case
-        (expect (not (null (cl-regex-kit::byte-matcher-matches-p matcher octet)))
-                :to-equal expected)))))
+    (signals error (cl-regex-kit::matcher-matches-p '(:unknown) #\a))))
+
+(it-each (((:ranges ((#\a . #\c))) 98 t)
+          ((:union (:ranges ((#\a . #\c)))) 98 t)
+          ((:intersection (:ranges ((#\a . #\c))) (:ranges ((98 . 99)))) 98 t)
+          ((:difference (:ranges ((#\a . #\c))) (:ranges ((98 . 98)))) 97 t)
+          ((:symmetric-difference (:ranges ((#\a . #\c))) (:ranges ((98 . 100)))) 97 t)
+          ((:negate (:ranges ((#\a . #\c)))) 122 t)
+          ((:unknown) 97 nil))
+    "evaluates byte matcher ~S against octet ~D"
+    (matcher octet expected)
+  (expect (not (null (cl-regex-kit::byte-matcher-matches-p matcher octet)))
+          :to-equal expected))
 
 (it "handles byte-class folding, boundaries, and CRLF positions"
-  (flet ((octets (&rest values)
-           (make-array (length values) :element-type '(unsigned-byte 8)
-                       :initial-contents values)))
-    (let ((unicode-class
-            (make-instance 'cl-regex-kit::char-class-node
-                           :ranges nil
-                           :case-insensitive-p t
-                           :unicode-p t))
-          (byte-class
-            (make-instance 'cl-regex-kit::char-class-node
-                           :ranges '((#\a #\c))
-                           :case-insensitive-p t
-                           :unicode-p nil)))
-      (expect (cl-regex-kit::class-matches-p unicode-class #\A) :to-be-null)
-      (expect (cl-regex-kit::class-matches-octet-p byte-class #x42)
-              :to-be-truthy)
-      (expect (cl-regex-kit::class-matches-octet-p byte-class #x63)
-              :to-be-truthy))
-    (expect (cl-regex-kit::byte-matcher-matches-p
-             '(:symmetric-difference (:ranges ((97 . 99))) (:ranges ((98 . 100))))
-             #x62)
-            :to-be-null)
-    (let ((text (octets #x61 #xc3 #xa9 #x21)))
-      (expect (cl-regex-kit::byte-word-boundary-p text 1) :to-be-truthy)
-      (expect (cl-regex-kit::byte-word-start-p text 1) :to-be-null)
-      (expect (cl-regex-kit::byte-word-end-p text 1) :to-be-truthy)
-      (expect (cl-regex-kit::byte-unicode-word-boundary-p text 1) :to-be-null)
-      (expect (cl-regex-kit::byte-unicode-word-boundary-p text 2) :to-be-null))
-    (let ((crlf (octets #x61 #x0d #x0a #x62)))
-      (expect (cl-regex-kit::byte-line-start-p crlf 2 t #\Newline) :to-be-null)
-      (expect (cl-regex-kit::byte-line-start-p crlf 3 t #\Newline) :to-be-truthy)
-      (expect (cl-regex-kit::byte-line-end-p crlf 1 t #\Newline) :to-be-truthy)
-      (expect (cl-regex-kit::byte-line-end-p crlf 2 t #\Newline) :to-be-null))))
+  (let ((unicode-class
+          (make-instance 'cl-regex-kit::char-class-node
+                         :ranges nil
+                         :case-insensitive-p t
+                         :unicode-p t))
+        (byte-class
+          (make-instance 'cl-regex-kit::char-class-node
+                         :ranges '((#\a #\c))
+                         :case-insensitive-p t
+                         :unicode-p nil)))
+    (expect (cl-regex-kit::class-matches-p unicode-class #\A) :to-be-null)
+    (expect (cl-regex-kit::class-matches-octet-p byte-class #x42)
+            :to-be-truthy)
+    (expect (cl-regex-kit::class-matches-octet-p byte-class #x63)
+            :to-be-truthy))
+  (expect (cl-regex-kit::byte-matcher-matches-p
+           '(:symmetric-difference (:ranges ((97 . 99))) (:ranges ((98 . 100))))
+           #x62)
+          :to-be-null)
+  (let ((text (octets #x61 #xc3 #xa9 #x21)))
+    (expect (cl-regex-kit::byte-word-boundary-p text 1) :to-be-truthy)
+    (expect (cl-regex-kit::byte-word-start-p text 1) :to-be-null)
+    (expect (cl-regex-kit::byte-word-end-p text 1) :to-be-truthy)
+    (expect (cl-regex-kit::byte-unicode-word-boundary-p text 1) :to-be-null)
+    (expect (cl-regex-kit::byte-unicode-word-boundary-p text 2) :to-be-null))
+  (let ((crlf (octets #x61 #x0d #x0a #x62)))
+    (expect (cl-regex-kit::byte-line-start-p crlf 2 t #\Newline) :to-be-null)
+    (expect (cl-regex-kit::byte-line-start-p crlf 3 t #\Newline) :to-be-truthy)
+    (expect (cl-regex-kit::byte-line-end-p crlf 1 t #\Newline) :to-be-truthy)
+    (expect (cl-regex-kit::byte-line-end-p crlf 2 t #\Newline) :to-be-null)))
 
 (it "distinguishes byte and Unicode boundary edge cases"
-  (flet ((octets (&rest values)
-           (make-array (length values) :element-type '(unsigned-byte 8)
-                       :initial-contents values)))
-    (expect (cl-regex-kit::ascii-case-insensitive-char= #\A #\a) :to-be-truthy)
-    (expect (cl-regex-kit::ascii-case-insensitive-char=
-             (code-char #x00e9) (code-char #x00c9))
-            :to-be-null)
-    (expect (cl-regex-kit::byte-matcher-matches-p
-             '(:symmetric-difference (:ranges ((97 . 97)))
-                                    (:ranges ((98 . 98))))
-             #x62)
-            :to-be-truthy)
-    (let ((text (octets #x61 #x21)))
-      (expect (cl-regex-kit::byte-unicode-word-start-p text 0) :to-be-truthy)
-      (expect (cl-regex-kit::byte-unicode-word-end-p text 1) :to-be-truthy)
-      (expect (cl-regex-kit::byte-unicode-word-start-half-p text 0) :to-be-truthy)
-      (expect (cl-regex-kit::byte-unicode-word-end-half-p text 1) :to-be-truthy))
-    (let ((text (format nil "a~C~Cb" #\Return #\Newline)))
-      (expect (cl-regex-kit::line-start-p text 2 t #\Newline) :to-be-null)
-      (expect (cl-regex-kit::line-start-p text 3 t #\Newline) :to-be-truthy)
-      (expect (cl-regex-kit::line-end-p text 1 t #\Newline) :to-be-truthy)
-      (expect (cl-regex-kit::line-end-p text 2 t #\Newline) :to-be-null))))
+  (expect (cl-regex-kit::ascii-case-insensitive-char= #\A #\a) :to-be-truthy)
+  (expect (cl-regex-kit::ascii-case-insensitive-char=
+           (code-char #x00e9) (code-char #x00c9))
+          :to-be-null)
+  (expect (cl-regex-kit::byte-matcher-matches-p
+           '(:symmetric-difference (:ranges ((97 . 97)))
+                                  (:ranges ((98 . 98))))
+           #x62)
+          :to-be-truthy)
+  (let ((text (octets #x61 #x21)))
+    (expect (cl-regex-kit::byte-unicode-word-start-p text 0) :to-be-truthy)
+    (expect (cl-regex-kit::byte-unicode-word-end-p text 1) :to-be-truthy)
+    (expect (cl-regex-kit::byte-unicode-word-start-half-p text 0) :to-be-truthy)
+    (expect (cl-regex-kit::byte-unicode-word-end-half-p text 1) :to-be-truthy))
+  (let ((text (format nil "a~C~Cb" #\Return #\Newline)))
+    (expect (cl-regex-kit::line-start-p text 2 t #\Newline) :to-be-null)
+    (expect (cl-regex-kit::line-start-p text 3 t #\Newline) :to-be-truthy)
+    (expect (cl-regex-kit::line-end-p text 1 t #\Newline) :to-be-truthy)
+    (expect (cl-regex-kit::line-end-p text 2 t #\Newline) :to-be-null)))
 
 (it "keeps string and UTF-8 octet boundary domains distinct at input edges"
-  (flet ((octets (&rest values)
-           (make-array (length values)
-                       :element-type (quote (unsigned-byte 8))
-                       :initial-contents values)))
-    (let ((text "a"))
-      (expect (cl-regex-kit::word-start-p text 0 t) :to-be-truthy)
-      (expect (cl-regex-kit::word-end-p text 1 t) :to-be-truthy)
-      (expect (cl-regex-kit::word-boundary-p text 0 t) :to-be-truthy)
-      (expect (cl-regex-kit::word-boundary-p text 1 t) :to-be-truthy))
-    (let ((text (octets #xc3 #xa9)))
-      (expect (cl-regex-kit::byte-unicode-word-start-p text 0) :to-be-truthy)
-      (expect (cl-regex-kit::byte-unicode-word-end-p text 2) :to-be-truthy)
-      (expect (cl-regex-kit::byte-unicode-word-boundary-p text 0) :to-be-truthy)
-      (expect (cl-regex-kit::byte-unicode-word-boundary-p text 1) :to-be-null)
-      (expect (cl-regex-kit::byte-unicode-word-boundary-p text 2) :to-be-truthy))
-    (let ((malformed (octets #x80)))
-      (expect (cl-regex-kit::byte-unicode-non-boundary-position-p malformed 0)
-              :to-be-null)
-      (expect (cl-regex-kit::byte-unicode-non-boundary-position-p malformed 1)
-              :to-be-null))))
+  (let ((text "a"))
+    (expect (cl-regex-kit::word-start-p text 0 t) :to-be-truthy)
+    (expect (cl-regex-kit::word-end-p text 1 t) :to-be-truthy)
+    (expect (cl-regex-kit::word-boundary-p text 0 t) :to-be-truthy)
+    (expect (cl-regex-kit::word-boundary-p text 1 t) :to-be-truthy))
+  (let ((text (octets #xc3 #xa9)))
+    (expect (cl-regex-kit::byte-unicode-word-start-p text 0) :to-be-truthy)
+    (expect (cl-regex-kit::byte-unicode-word-end-p text 2) :to-be-truthy)
+    (expect (cl-regex-kit::byte-unicode-word-boundary-p text 0) :to-be-truthy)
+    (expect (cl-regex-kit::byte-unicode-word-boundary-p text 1) :to-be-null)
+    (expect (cl-regex-kit::byte-unicode-word-boundary-p text 2) :to-be-truthy))
+  (let ((malformed (octets #x80)))
+    (expect (cl-regex-kit::byte-unicode-non-boundary-position-p malformed 0)
+            :to-be-null)
+    (expect (cl-regex-kit::byte-unicode-non-boundary-position-p malformed 1)
+            :to-be-null)))
 (it
   "executes pre-resolved Unicode descriptors without resolver work"
   (let ((explicit (compile-regex "\\p{Lu}+"))
@@ -376,24 +378,26 @@
     (expect (string (code-char #xff11)) :to-match-regex digit)
     (expect (string (code-char #x200c)) :to-match-regex word)
     (expect (string (code-char #x3000)) :to-match-regex space)
-    (expect "α" :to-match-regex class-property))
-  (dolist (case `(("Lu" #\A t)
-                  ("Lu" #\a nil)
-                  ("Nd" ,(code-char #xff11) t)
-                  ("White_Space" ,(code-char #x3000) t)
-                  ("Greek" #\α t)))
-    (destructuring-bind (name character expected) case
-      (let ((descriptor
-              (or (cl-regex-kit::resolve-unicode-property name)
-                  (error "Unicode property did not resolve: ~A" name))))
-        (expect
-          (not
-            (null
-              (cl-regex-kit::unicode-property-descriptor-matches-p
-                descriptor
-                character)))
-          :to-equal
-          expected)))))
+    (expect "α" :to-match-regex class-property)))
+
+(it-each (("Lu" #\A t)
+          ("Lu" #\a nil)
+          ("Nd" #.(code-char #xff11) t)
+          ("White_Space" #.(code-char #x3000) t)
+          ("Greek" #\α t))
+    "executes pre-resolved Unicode descriptor ~A for ~S"
+    (name character expected)
+  (let ((descriptor
+          (or (cl-regex-kit::resolve-unicode-property name)
+              (error "Unicode property did not resolve: ~A" name))))
+    (expect
+      (not
+        (null
+          (cl-regex-kit::unicode-property-descriptor-matches-p
+            descriptor
+            character)))
+      :to-equal
+      expected)))
 
 (it
   "resolves properties that fall outside SBCL's own grapheme-break classification"
@@ -452,45 +456,29 @@
     (cl-regex-kit::pack-unicode-property-ranges (quote ((3 . 4) (1 . 2)))))
   (signals error
     (cl-regex-kit::pack-unicode-property-ranges (quote ((1 . 3) (3 . 4))))))
-(it
-  "treats representative Unicode property aliases equivalently"
-  (labels ((matches-p (property character)
-             (let ((descriptor
-                     (or (cl-regex-kit::resolve-unicode-property property)
-                         (error "Unicode property did not resolve: ~A" property))))
-               (not
-                 (null
-                   (cl-regex-kit::unicode-property-descriptor-matches-p
-                     descriptor
-                     character)))))
-           (expect-equivalent (left right character)
-             (expect (matches-p left character)
-                     :to-equal
-                     (matches-p right character))))
-    (expect-equivalent "Lu" "General_Category=Uppercase_Letter" #\A)
-    (expect-equivalent "isLu" "Lu" #\A)
-    (expect-equivalent "sc=Grek" "Script=Greek" #\α)
-    (expect-equivalent "Script=isGreek" "Script=Greek" #\α)
-    (expect-equivalent "Grek" "Greek" #\α)
-    (expect-equivalent "isGrek" "Grek" #\α)
-    (expect-equivalent "Latn" "Latin" #\A)
-    (expect-equivalent "Cyrl" "Cyrillic" (code-char #x0414))
-    (expect-equivalent "scx=Grek" "Script_Extensions=Greek" #\α)
-    (expect-equivalent "Script_Extensions=isGreek"
-                       "Script_Extensions=Greek"
-                       #\α)
-    (expect-equivalent "blk=Basic_Latin" "InBasic_Latin" #\A)
-    (expect-equivalent "Block=isBasic_Latin" "Block=Basic_Latin" #\A)
-    (expect-equivalent "age=1.1" "Age=V1_1" #\A)
-    (expect-equivalent "Age=isV1_1" "Age=V1_1" #\A)
-    (expect-equivalent "GCB=EX" "Grapheme_Cluster_Break=Extend"
-                       (code-char #x0301))
-    (expect-equivalent "GCB=isExtend" "GCB=Extend" (code-char #x0301))
-    (expect-equivalent "WB=LE" "Word_Break=ALetter" #\a)
-    (expect-equivalent "WB=isALetter" "WB=ALetter" #\a)
-    (expect-equivalent "SB=UP" "Sentence_Break=Upper" #\A)
-    (expect-equivalent "SB=isUpper" "Sentence_Break=Upper" #\A)
-    (expect-equivalent "isWhite_Space" "White_Space" #\Space)))
+(it-unicode-property-equivalence-cases
+ "treats representative Unicode property aliases equivalently"
+ (("Lu" "General_Category=Uppercase_Letter" #\A)
+  ("isLu" "Lu" #\A)
+  ("sc=Grek" "Script=Greek" #\α)
+  ("Script=isGreek" "Script=Greek" #\α)
+  ("Grek" "Greek" #\α)
+  ("isGrek" "Grek" #\α)
+  ("Latn" "Latin" #\A)
+  ("Cyrl" "Cyrillic" #.(code-char #x0414))
+  ("scx=Grek" "Script_Extensions=Greek" #\α)
+  ("Script_Extensions=isGreek" "Script_Extensions=Greek" #\α)
+  ("blk=Basic_Latin" "InBasic_Latin" #\A)
+  ("Block=isBasic_Latin" "Block=Basic_Latin" #\A)
+  ("age=1.1" "Age=V1_1" #\A)
+  ("Age=isV1_1" "Age=V1_1" #\A)
+  ("GCB=EX" "Grapheme_Cluster_Break=Extend" #.(code-char #x0301))
+  ("GCB=isExtend" "GCB=Extend" #.(code-char #x0301))
+  ("WB=LE" "Word_Break=ALetter" #\a)
+  ("WB=isALetter" "WB=ALetter" #\a)
+  ("SB=UP" "Sentence_Break=Upper" #\A)
+  ("SB=isUpper" "Sentence_Break=Upper" #\A)
+  ("isWhite_Space" "White_Space" #\Space)))
 (it "uses finite SBCL Unicode metadata without keyword-package coupling"
   (labels ((descriptor (name)
              (or (cl-regex-kit::resolve-unicode-property name)

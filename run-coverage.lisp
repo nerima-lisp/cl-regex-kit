@@ -43,7 +43,8 @@
       "unicode-binary-property-range-data"
       "unicode-case-folding-data"
       "unicode-extra-binary-property-data"
-      "unicode-property-data"))
+      "unicode-property-data"
+      "unicode-indic-conjunct-break-data"))
   "Declarative files excluded from executable-line coverage reporting.")
 
 (defun source-file-p (source-directory)

@@ -193,12 +193,11 @@
   (append
    (workload-description workload)
    (list :phase :compile :operations iterations)
-   (measure-samples
+    (measure-samples
     sample-count
     (lambda ()
       (let ((checksum 0))
         (dotimes (index iterations checksum)
-          (declare (ignore index))
           (when (cl-regex-kit::call-with-timeout
                  timeout-seconds
                  (lambda ()
@@ -250,7 +249,6 @@
                              (if (eq mode :sequential) 1
                                cl-regex-kit::+nfa-merge-max-parallelism+)))
                         (dotimes (index iterations checksum)
-                          (declare (ignore index))
                           (let ((regex-set
                                  (cl-regex-kit::call-with-timeout
                                   timeout-seconds
@@ -296,6 +294,98 @@
                    :timeout
                    timeout-seconds)
               (incf matches)))))))))
+
+(defun append-benchmark-result (state result)
+  (list*
+   :results
+   (append (getf state :results) (list result))
+   state))
+
+(defparameter *benchmark-workload-pipeline*
+  (make-pipeline
+   :stages
+   (list
+    (make-node
+     "compile"
+     :inputs
+     '("state")
+     :outputs
+     '("state")
+     :handler
+     (lambda (input context)
+       (declare (ignore context))
+       (append-benchmark-result
+        input
+        (benchmark-compilation
+         (getf input :workload)
+         (getf input :compile-iterations)
+         (getf input :sample-count)
+         (getf input :timeout-seconds)))))
+    (make-node
+     "regex-set"
+     :inputs
+     '("state")
+     :outputs
+     '("state")
+     :handler
+     (lambda (input context)
+       (declare (ignore context))
+       (destructuring-bind (sequential parallel)
+           (benchmark-regex-set-compilation
+            (getf input :workload)
+            (getf input :compile-iterations)
+            (getf input :sample-count)
+            (getf input :timeout-seconds))
+         (append-benchmark-result
+          (append-benchmark-result input sequential)
+          parallel))))
+    (make-node
+     "hot-match"
+     :inputs
+     '("state")
+     :outputs
+     '("state")
+     :handler
+     (lambda (input context)
+       (declare (ignore context))
+       (append-benchmark-result
+        input
+        (benchmark-hot-matching
+         (getf input :workload)
+         (getf input :iterations)
+         (getf input :warmup)
+         (getf input :sample-count)
+         (getf input :timeout-seconds)))))
+    (make-node
+     "finish"
+     :inputs
+     '("state")
+     :outputs
+     '("results")
+     :handler
+     (lambda (input context)
+       (declare (ignore context))
+       (list (cons "results" (getf input :results))))))))
+
+(defun benchmark-workload-results (workload
+                                   iterations
+                                   compile-iterations
+                                   warmup
+                                   sample-count
+                                   timeout-seconds)
+  (run-pipeline
+   *benchmark-workload-pipeline*
+   :input
+   (list
+    "state"
+    (list
+     :results '()
+     :workload workload
+     :iterations iterations
+     :compile-iterations compile-iterations
+     :warmup warmup
+     :sample-count sample-count
+     :timeout-seconds timeout-seconds))))
 
 (defun benchmark-metadata (iterations
                            compile-iterations
@@ -348,6 +438,55 @@
   (unless (and (integerp value) (plusp value))
     (error "~A must be a positive integer, got ~S" name value)))
 
+(defun benchmark-output-format ()
+  (let ((value (uiop:getenv "CL_REGEX_KIT_BENCH_OUTPUT_FORMAT")))
+    (cond ((or (null value) (string= value ""))
+           :json)
+          ((string-equal value "json")
+           :json)
+          (t
+           (error
+            "CL_REGEX_KIT_BENCH_OUTPUT_FORMAT must be json, got ~S"
+            value)))))
+
+(defun plistp (value)
+  (and (listp value)
+       (evenp (length value))
+       (loop for (key nil) on value by #'cddr
+             always (keywordp key))))
+
+(defun keyword-json-key (keyword)
+  (string-downcase (symbol-name keyword)))
+
+(defun json-object-from-plist (plist)
+  (json-kit:alist->json-object
+   (loop for (key value) on plist by #'cddr
+         collect (cons (keyword-json-key key)
+                       (benchmark-value->json value)))))
+
+(defun benchmark-value->json (value)
+  (cond ((keywordp value)
+         (keyword-json-key value))
+        ((null value)
+         json-kit:+json-null+)
+        ((stringp value)
+         value)
+        ((characterp value)
+         (string value))
+        ((vectorp value)
+         (map 'vector #'benchmark-value->json value))
+        ((plistp value)
+         (json-object-from-plist value))
+        ((listp value)
+         (mapcar #'benchmark-value->json value))
+        (t
+         value)))
+
+(defun write-benchmark-report (report stream)
+  (json-kit:write-json (benchmark-value->json report) stream :pretty t)
+  (terpri stream)
+  (finish-output stream))
+
 (defun run-benchmarks (&key
                        (iterations
                         (environment-integer
@@ -368,6 +507,7 @@
                          (uiop:getenv "CL_REGEX_KIT_BENCH_REVISION")
                          "unspecified"))
                        (timeout-seconds 5d0)
+                       (output-format (benchmark-output-format))
                        (stream *standard-output*))
   (require-positive-integer "iterations" iterations)
   (require-positive-integer "compile-iterations" compile-iterations)
@@ -377,6 +517,8 @@
     (error "revision must be a non-empty string, got ~S" revision))
   (unless (and (realp timeout-seconds) (plusp timeout-seconds))
     (error "timeout-seconds must be positive, got ~S" timeout-seconds))
+  (unless (eq output-format :json)
+    (error "output-format must be :json, got ~S" output-format))
   (let ((workloads (make-workloads seed)))
     (dolist (workload workloads)
       (verify-workload workload timeout-seconds))
@@ -395,26 +537,13 @@
             :verified
             :results
             (loop for workload in workloads
-                  for regex-set-results = (benchmark-regex-set-compilation
-                                           workload
-                                           compile-iterations
-                                           sample-count
-                                           timeout-seconds)
-                  append (list
-                          (benchmark-compilation
-                           workload
-                           compile-iterations
-                           sample-count
-                           timeout-seconds)
-                          (first regex-set-results)
-                          (second regex-set-results)
-                          (benchmark-hot-matching
-                           workload
-                           iterations
-                           warmup
-                           sample-count
-                           timeout-seconds))))))
-      (write report :stream stream :pretty t)
-      (terpri stream)
-      (finish-output stream)
+                  append
+                  (benchmark-workload-results
+                   workload
+                   iterations
+                   compile-iterations
+                   warmup
+                   sample-count
+                   timeout-seconds)))))
+      (write-benchmark-report report stream)
       report)))
