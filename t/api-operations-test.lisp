@@ -146,6 +146,15 @@
    (expect (match-end (scan dot snowman :end 3)) :to-equal 3)))
 
 (it
+ "matches through the boolean Pike VM path without building results"
+ (let ((regex (compile-regex "a+")))
+   (expect (is-match-p regex "xxaa") :to-be-truthy)
+   (expect (is-match-p regex "xxbb") :to-be nil)
+   (expect (is-match-at regex "xxaa" 2) :to-be-truthy)
+   (expect (is-match-p regex "xxaa" :start 2 :end 4) :to-be-truthy)
+   (expect (is-match-p regex "xxaa" :start 2 :end 2) :to-be nil)))
+
+(it
  "validates compiler options consistently for regexes"
  (expect-signals-for-functions
   type-error
