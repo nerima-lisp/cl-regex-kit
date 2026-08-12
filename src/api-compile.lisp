@@ -291,6 +291,9 @@ executed by the bounded advanced matcher instead."
           (ast-static-capture-count ast)
         (make-instance (quote regex)
                        :program program
+                       :slot-count (if program
+                                       (slot-count-for-program program)
+                                     0)
                        :ast ast
                        :advanced-p advanced-p
                        :advanced-step-limit size-limit

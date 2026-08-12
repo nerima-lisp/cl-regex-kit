@@ -5,6 +5,7 @@
 
 (defclass regex ()
   ((program :initarg :program :reader regex-program)
+   (slot-count :initarg :slot-count :reader regex-slot-count :initform 0)
    (ast :initarg :ast :reader regex-ast)
    (advanced-p :initarg :advanced-p :reader regex-advanced-p
                :initform nil)

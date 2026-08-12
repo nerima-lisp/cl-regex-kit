@@ -47,14 +47,14 @@
             :workspace
             workspace)))
       (when (plusp pattern-count)
-        (let ((pending (make-array (1+ (- limit start)) :initial-element nil)))
+        (let ((pending (make-array 5 :initial-element nil)))
           (loop for position from start to limit
-                do (let* ((pending-index (- position start))
+                do (let* ((pending-index (mod (- position start) 5))
                    (seeds
                   (prog1
                     (nreverse (aref pending pending-index))
                     (setf (aref pending pending-index) nil)))
-                   (current (closure (nconc seeds (list 0)) position)))
+                   (current (closure (cons 0 seeds) position)))
               (dolist (pc current)
                 (let ((instruction (aref program pc)))
                   (case (inst-op instruction)
@@ -70,7 +70,7 @@
                           byte-mode-p
                           never-newline-p)
                         (when matched-p
-                          (push (inst-b instruction) (aref pending (- next-position start)))))))))))))
+                          (push (inst-b instruction) (aref pending (mod (- next-position start) 5)))))))))))))
       (cond
         (stop-at-first-match-p nil)
         (matches-supplied-p match-bits)

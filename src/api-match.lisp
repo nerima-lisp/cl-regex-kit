@@ -96,7 +96,8 @@ leftmost-first semantics. Return a MATCH-RESULT, or NIL if no match exists."
 
 (defun is-match-p (regex text &key (start 0) end timeout)
   "Return true when REGEX matches TEXT within [START, END)."
-  (not (null (scan regex text :start start :end end :timeout timeout))))
+  (with-pike-vm-match (result regex text start end timeout :boolean-p t)
+    (not (null result))))
 
 (define-forwarding-wrapper is-match-at
     (regex text start &key end timeout)

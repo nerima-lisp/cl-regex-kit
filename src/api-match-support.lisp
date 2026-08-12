@@ -155,6 +155,7 @@ written, regardless of how many times the expansion below references them."
                        (run-pike-vm (regex-program ,regex-var) ,text-var
                                     :start ,start-var
                                     :end limit
+                                    :slot-count (regex-slot-count ,regex-var)
                                     :never-newline-p (regex-never-newline-p ,regex-var)
                                     ,@vm-keys))))))
          ,@body)))
