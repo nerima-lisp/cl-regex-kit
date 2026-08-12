@@ -75,9 +75,9 @@ position, retaining the usual branch priority to resolve equal-length paths."
          (length (length text))
          (limit (or end length))
          (byte-mode-p (not (stringp text)))
-         (workspace (unless (and boolean-p (zerop slot-count))
-                     (make-pike-vm-closure-workspace (length program)))))
-    (when (and boolean-p (zerop slot-count))
+         (workspace (unless (and boolean-p (= slot-count 2))
+                      (make-pike-vm-closure-workspace (length program)))))
+    (when (and boolean-p (= slot-count 2))
       (return-from run-pike-vm
         (run-pike-vm-boolean program text :start start :end end
                              :never-newline-p never-newline-p)))
