@@ -117,6 +117,7 @@
                           (visit (inst-a instruction))
                           (visit (inst-b instruction)))
                          (:jmp (visit (inst-a instruction)))
+                         (:save (visit (inst-b instruction)))
                          ((:bol :eol :bos :eos :boundary :non-boundary
                            :word-start :word-end :word-start-half :word-end-half)
                           (when (zero-width-instruction-matches-p instruction text position length byte-mode-p)
