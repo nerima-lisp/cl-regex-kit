@@ -16,8 +16,9 @@ nix run .#benchmark
 The entry point is `run-benchmarks.lisp`, which loads the
 `cl-regex-kit/benchmark` system and calls
 `cl-regex-kit/benchmarks:run-benchmarks`. Invoking the script directly works
-too, but only where ASDF can already resolve `cl-parser-kit` and
-`cl-concurrent-kit` -- inside the development shell, for example:
+too, but only where ASDF can already resolve `cl-parser-kit`,
+`cl-concurrent-kit`, and `cl-json-kit` -- inside the development shell, for
+example:
 
 ```console
 nix develop --command sbcl --script run-benchmarks.lisp
@@ -30,7 +31,8 @@ except `CL_REGEX_KIT_BENCH_REVISION` must parse as a positive integer; the
 suite signals an error rather than falling back to the default when one does
 not.
 `CL_REGEX_KIT_BENCH_REVISION` is a non-empty string recorded in the report
-metadata.
+metadata. `CL_REGEX_KIT_BENCH_OUTPUT_FORMAT` selects the stream encoding and
+must be either `json` or `lisp`.
 
 | Variable | Default | Purpose |
 | --- | ---: | --- |
@@ -41,13 +43,16 @@ metadata.
 | `CL_REGEX_KIT_BENCH_SEED` | `1729` | Seed for generated benchmark input |
 | `CL_REGEX_KIT_BENCH_REGEX_SET_PATTERN_COUNT` | `128` | Patterns per compiled regex set |
 | `CL_REGEX_KIT_BENCH_REVISION` | `unspecified` | Revision label in report metadata |
+| `CL_REGEX_KIT_BENCH_OUTPUT_FORMAT` | `json` | Stream output format (`json` or `lisp`) |
 
 The per-operation timeout is the one setting with no environment variable. It
 is the `timeout-seconds` keyword argument to
-`cl-regex-kit/benchmarks:run-benchmarks`, and `run-benchmarks.lisp` calls that
-function with no arguments, so both `nix run .#benchmark` and a direct script
-invocation always use its default. Changing it means calling `run-benchmarks`
-yourself.
+`cl-regex-kit/benchmarks:run-benchmarks`, and `run-benchmarks.lisp` calls
+that function with no arguments, so both `nix run .#benchmark` and a direct
+script invocation always use its default. Changing it means calling
+`run-benchmarks` yourself. The same function returns the benchmark report as a
+Lisp property list regardless of stream format; `CL_REGEX_KIT_BENCH_OUTPUT_FORMAT`
+changes only what gets written to the stream.
 
 For a smaller repeatable run, override the match and compile counts and keep
 the seed fixed:
@@ -86,17 +91,22 @@ if that checksum differs between samples of the same phase. A run that varies
 in what it computed is discarded rather than reported.
 
 Every compile and match operation runs under a per-operation timeout, recorded
-in the report metadata as `:per-operation-timeout-seconds`.
+in the report metadata as `per-operation-timeout-seconds`.
 
 ## Interpreting results
 
-Each entry under `:results` carries the raw samples plus the median, minimum,
-and maximum of both elapsed seconds and bytes consed. Runtime metadata
-(implementation, version) and host metadata (machine, software type and
-version) are report-level rather than per result: the suite emits them once,
-under `:metadata`. Note that the allocation figure is *bytes* consed, from
-`sb-ext:get-bytes-consed`, not a count of allocations; it is `nil` on
-implementations other than SBCL.
+The default stream output is pretty-printed JSON generated with
+`cl-json-kit`. Top-level keys are `metadata`, `correctness`, and `results`.
+Nested keys follow the same names as the original property-list report, lower
+cased and with hyphens preserved, for example
+`per-operation-timeout-seconds` and `elapsed-seconds`. Each entry under
+`results` carries the raw samples plus the median, minimum, and maximum of
+both elapsed seconds and bytes consed. Runtime metadata (implementation,
+version) and host metadata (machine, software type and version) are
+report-level rather than per result: the suite emits them once, under
+`metadata`. Note that the allocation figure is *bytes* consed, from
+`sb-ext:get-bytes-consed`, not a count of allocations; it is emitted as JSON
+`null` on implementations other than SBCL.
 
 Timings and allocation figures vary with garbage collection and with the host.
 Compare repeated runs that used the same workload order and the same seed.

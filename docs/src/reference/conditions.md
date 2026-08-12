@@ -139,8 +139,8 @@ finish the search.
 `max-edits` bounds the permitted Levenshtein-style insertions, deletions, and
 substitutions. `state-limit` defaults to the library's bounded fuzzy search
 limit and prevents an input from expanding the search without bound. The
-fuzzy entry points are `fuzzy-scan`, `fuzzy-scan-at`, `fuzzy-search`,
-`fuzzy-search-at`, `fuzzy-match`, and `byte-fuzzy-match`.
+fuzzy entry points are `fuzzy-scan`, `fuzzy-scan-at`, `fuzzy-match`, and
+`byte-fuzzy-match`.
 
 ## Advanced executor limits
 

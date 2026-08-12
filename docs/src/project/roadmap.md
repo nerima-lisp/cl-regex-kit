@@ -17,10 +17,8 @@ one input unit after the current match's start.
 1. **`parse-regex`** -- literals, concatenation, alternation, grouping
    (capturing, named, and `(?:...)`), repetition (`*`, `+`, `?`, `{m}`,
    `{m,n}`, `{m,}`,
-   greedy and lazy), character classes and set operations (including
-   Perl/PCRE2-style extended classes `(?[...])` with grouped expressions,
-   escapes, and POSIX atoms), escapes, inline flags, and line, absolute, and
-   word-boundary anchors.
+   greedy and lazy), character classes and set operations, escapes, inline
+   flags, and line, absolute, and word-boundary anchors.
 2. **`compile-to-nfa`** -- Thompson construction from the AST to the `inst`
    program, one case per `regex-node` subclass.
 3. **`run-pike-vm`** -- the thread-set simulation itself: sparse-set thread
@@ -68,7 +66,7 @@ one input unit after the current match's start.
     ordinary consuming NFA subset, with explicit rejection of unsupported
     zero-width, advanced, and mixed raw/Unicode consuming programs.
 14. Bounded fuzzy matching supports regular NFA patterns through `fuzzy-scan`,
-    `fuzzy-search`, `fuzzy-match`, and `byte-fuzzy-match`, with explicit edit
+    `fuzzy-match`, and `byte-fuzzy-match`, with explicit edit
     and state limits and a `fuzzy-match-unsupported` condition for advanced
     patterns; `match-edit-distance` reports the selected edit count.
 

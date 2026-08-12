@@ -30,13 +30,16 @@ flake depend on.
 ## Tests and coverage
 
 Tests live in `t/` and run under
-[cl-weave](https://nerima-lisp.github.io/cl-weave/). The suite combines
+[cl-weave](https://nerima-lisp.github.io/cl-weave/) with repository-local
+declarative case macros for the grep/byte matrix tests. The
+suite combines
 focused examples with shrinkable property tests and bounded parser fuzzing, so
 a failure retains a minimal reproducing input.
 
 `nix run .#test` supplies the dependencies the suite needs. Running the script
 by hand works inside the development shell, where ASDF can already resolve
-`cl-parser-kit`, `cl-concurrent-kit`, `cl-weave`, and `cl-cli`:
+`cl-parser-kit`, `cl-concurrent-kit`, `cl-weave`, `cl-json-kit`,
+`cl-codec-kit`, `cl-dataflow`, and `cl-cli`:
 
 ```console
 nix develop --command sbcl --script run-tests.lisp

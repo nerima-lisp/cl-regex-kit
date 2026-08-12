@@ -53,7 +53,7 @@ non-overlapping matches, mirroring Rust `Regex::split`/`splitn`. `replace-first`
 `(match-result text)` at each match. Templates use Rust-style `$0`, `$1`,
 `$name`, `${name}`, and `$$`; a backslash is literal text.
 
-`fuzzy-scan` and `fuzzy-search` support bounded insertions, deletions, and
+`fuzzy-scan` supports bounded insertions, deletions, and
 substitutions for regular NFA regexes. Use `fuzzy-match` or
 `byte-fuzzy-match` for compile-on-demand character or octet-vector matching;
 `match-edit-distance` reports the selected edit count.
@@ -103,7 +103,7 @@ a set containing such members does not promise one input scan for every member.
 ```nix
 # flake.nix
 inputs.cl-regex-kit = {
-  url = "github:nerima-lisp/cl-regex-kit/v1.0.0";
+  url = "github:nerima-lisp/cl-regex-kit/v2.0.0";
   inputs.nixpkgs.follows = "nixpkgs";
 };
 ```
@@ -119,6 +119,9 @@ Without Nix, put the repository where ASDF can find it and evaluate
 [`cl-parser-kit`](https://github.com/nerima-lisp/cl-parser-kit) and
 [`cl-concurrent-kit`](https://github.com/nerima-lisp/cl-concurrent-kit); the
 test system also needs [`cl-weave`](https://github.com/nerima-lisp/cl-weave),
+[`cl-json-kit`](https://github.com/nerima-lisp/cl-json-kit),
+[`cl-codec-kit`](https://github.com/nerima-lisp/cl-codec-kit), and
+[`cl-dataflow`](https://github.com/nerima-lisp/cl-dataflow),
 and the optional command-line system needs
 [`cl-cli`](https://github.com/nerima-lisp/cl-cli).
 
@@ -172,11 +175,13 @@ The ASDF system loads the implementation in these broad layers:
 - **Pike VM:** `pike-vm-instructions.lisp` implements instruction matching;
   `pike-vm-closure.lisp` computes epsilon closures; `pike-vm-capture.lisp` runs
   the capture-aware VM; and `pike-vm-set.lisp` runs merged regex-set programs.
-- **Public API:** `api.lisp`, `api-match.lisp`, `api-operations.lisp`, and
-  `api-replace.lisp` provide compiled regexes and operations. `regex-set.lisp`
-  provides the regex-set API. `advanced-match.lisp` contains the bounded AST
-  evaluator, including its own input validation and leftmost-result
-  orchestration.
+- **Public API:** `api-regex.lisp`, `api-compile.lisp`,
+  `api-match-support.lisp`, `api-match.lisp`, `api-operations.lisp`, and
+  `api-replace.lisp` provide compiled regexes and operations.
+  `regex-set-compile.lisp` and `regex-set-match.lisp` provide the regex-set
+  API. `advanced-match.lisp` contains the bounded AST evaluator, while
+  `advanced-runner.lisp` owns the public timeout boundary and leftmost-result
+  entry point.
 
 Unicode property domains depend on SBCL's Unicode tables. Enumerating finite
 runtime domains also inspects internal `SB-KERNEL` function return-type
@@ -203,9 +208,11 @@ nix fmt              # format Nix sources (treefmt)
 ```
 
 Tests live in `t/` and run under [cl-weave](https://github.com/nerima-lisp/cl-weave),
-the org's test framework. `nix run .#test` provides the required dependencies;
-direct `sbcl --script run-tests.lisp` also requires ASDF to resolve
-`cl-parser-kit`, `cl-concurrent-kit`, `cl-weave`, and `cl-cli`.
+with repository-local declarative case macros for the grep/byte matrix tests.
+`nix run .#test` provides the required dependencies; direct
+`sbcl --script run-tests.lisp` also requires ASDF to resolve
+`cl-parser-kit`, `cl-concurrent-kit`, `cl-weave`, `cl-json-kit`,
+`cl-codec-kit`, `cl-dataflow`, and `cl-cli`.
 The suite combines focused examples with shrinkable property tests and bounded
 parser fuzzing, so failures retain a minimal reproducible input.
 `nix flake check -L` recompiles the production sources with SBCL's `sb-cover`
@@ -236,6 +243,9 @@ variables:
 | `CL_REGEX_KIT_BENCH_SAMPLES` | `5` | Independent measured samples per phase and workload |
 | `CL_REGEX_KIT_BENCH_SEED` | `1729` | Seed for generated benchmark input |
 | `CL_REGEX_KIT_BENCH_REVISION` | `unspecified` | Revision label recorded in report metadata |
+
+Benchmark reports are emitted as JSON only. `CL_REGEX_KIT_BENCH_OUTPUT_FORMAT`
+accepts `json` when set and rejects legacy Lisp or s-expression output modes.
 
 For example:
 

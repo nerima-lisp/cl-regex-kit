@@ -11,7 +11,8 @@ a `regex-node` tree (`regex-grammar.lisp`, `regex-grammar-support.lisp`, and
 `regex-grammar-classes.lisp`). From there the path forks. A
 regular pattern is compiled to a flat instruction program (`nfa.lisp`) and run
 by the Pike VM (`pike-vm-*.lisp`). A pattern using advanced constructs keeps
-its tree and is run by the bounded AST executor (`advanced-match.lisp`) instead.
+its tree and is run by the bounded AST executor (`advanced-match.lisp`), through
+the public execution boundary in `advanced-runner.lisp`, instead.
 Both paths produce the same `match-result`.
 
 ```mermaid
@@ -103,8 +104,8 @@ advanced constructs](../reference/compatibility.md) require runtime state
 that a finite automaton cannot represent without giving up the linear-time
 guarantee. `cl-regex-kit` keeps that guarantee for the regular path and routes
 these constructs to a separate bounded executor
-(`src/advanced-match.lisp`), which evaluates the AST directly with ordered
-backtracking and bounded search. Such a pattern never reaches
+(`src/advanced-match.lisp`, entered through `src/advanced-runner.lisp`), which
+evaluates the AST directly with ordered backtracking and bounded search. Such a pattern never reaches
 `compile-to-nfa` at all -- it keeps its AST instead of gaining a program, and
 `regex-advanced-p` reports which path a compiled regex took.
 

@@ -25,12 +25,7 @@ that every pattern still has the NFA path's worst-case bound.
   `upper`, `word`, and `xdigit`, including inner negation), plus intersection (`&&`), difference (`--`),
   and symmetric-difference (`~~`) set operations with nested or direct right
   operands; empty classes (`[]`) denote the empty set, and negated empty
-  classes (`[^]`) denote the full alphabet. Perl/PCRE2-style extended
-  character classes (`(?[...])`) additionally accept escaped atoms, POSIX
-  classes, nested ordinary classes, and grouped expressions. Their set
-  operators are complement (`!`), union (`|`, `+`), intersection (`&`),
-  difference (`-`), and symmetric difference (`^`); the doubled `&&`, `--`,
-  and `~~` spellings are accepted there as well.
+  classes (`[^]`) denote the full alphabet.
 - Unicode-aware `\\d`/`\\w`/`\\s` shorthands, `\\pX`/`\\PX` and `\\p{...}`/`\\P{...}` Unicode
   general-category, Script, Block, Age, Grapheme_Cluster_Break, Word_Break,
   Sentence_Break, selected binary properties, and Rust-compatible property-value
@@ -86,7 +81,7 @@ that every pattern still has the NFA path's worst-case bound.
 
 ## Bounded fuzzy matching
 
-`fuzzy-scan`, `fuzzy-search`, and their `-at` forms provide bounded
+`fuzzy-scan` and `fuzzy-scan-at` provide bounded
 Levenshtein-style insertions, deletions, and substitutions for regular NFA
 regexes. `fuzzy-match` and `byte-fuzzy-match` are compile-on-demand helpers;
 `match-edit-distance` reports the selected distance. `max-edits` controls the

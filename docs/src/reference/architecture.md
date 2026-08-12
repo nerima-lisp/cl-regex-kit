@@ -55,12 +55,33 @@ src/
                   RUN-PIKE-VM: INST program -> MATCH-RESULT
   pike-vm-set.lisp
                   RUN-PIKE-VM-SET: merged INST program -> matching indexes
-  api.lisp        compiled-regex model, compilation, literal macros, metadata
-  api-match.lisp  input validation, timeout handling, scans, and match accessors
+  api-regex.lisp  compiled-regex value object and metadata accessors
+  api-compile.lisp
+                  public compilation entry points, literal macros, and
+                  compile-time validation
+  api-match-support.lisp
+                  input validation, timeout handling, and reusable
+                  capture-location buffers
+  api-match.lisp  one-match execution, scan-family entry points, and match
+                  accessors
+  advanced-assertions.lisp
+                  lookaround direction handling, success filtering, and
+                  assertion result normalization
+  advanced-structure.lisp
+                  concat/alternation/repetition/group/conditional traversal
+                  and the root-first backtracking optimizer
   advanced-match.lisp
-                  bounded AST execution for backreferences, assertions,
-                  recursion, control verbs, validation, bounded search
-                  orchestration, and result selection for advanced constructs
+                  AST-local execution for backreferences, recursion, and
+                  control verbs
+  advanced-search.lisp
+                  candidate-state reduction, result selection, and leftmost
+                  candidate progression for advanced constructs
+  advanced-runner.lisp
+                  public timeout boundary and advanced-match entry point
+  fuzzy-runner.lisp
+                  bounded fuzzy NFA state exploration and candidate ordering
+  fuzzy-match.lisp
+                  public fuzzy scan/match entry points over fuzzy-runner.lisp
   api-operations.lisp
                   non-overlapping iteration and split operations
   streaming.lisp  chunk-fed buffering adapter and stream-oriented matching helpers
@@ -68,7 +89,11 @@ src/
                   bounded-memory incremental NFA matcher for consuming chunks
   api-replace.lisp
                   replacement templates and replacement operations
-  regex-set.lisp  multi-pattern compilation and matching
+  regex-set-compile.lisp
+                  regex-set data model, multi-pattern compilation, and
+                  literal builder macros
+  regex-set-match.lisp
+                  regex-set range validation plus multi-pattern matching/search
 cli/
   package.lisp    the CL-REGEX-KIT/CLI package, importing COMPILE-REGEX/
                   IS-MATCH-P from cl-regex-kit and cl-cli's app-builder API
@@ -85,10 +110,12 @@ component tree for the `cl-regex-kit/cli` system (`cl-regex-kit.asd`), which
 builds the `cl-regex-kit-grep` executable rather than a library.
 
 The API modules follow the execution direction rather than grouping unrelated
-public functions in one file: `api.lisp` creates immutable compiled values,
-`api-match.lisp` executes one match, `api-operations.lisp` consumes the match
-stream for iteration and splitting, `streaming.lisp` collects caller-provided
-chunks behind an explicit finish barrier,
+public functions in one file: `api-regex.lisp` defines the immutable compiled
+value and its metadata accessors, `api-compile.lisp` owns the public compiler
+entry points plus the literal macros, `api-match-support.lisp` validates public inputs and owns reusable
+capture-location storage, `api-match.lisp` executes one match,
+`api-operations.lisp` consumes the match stream for iteration and splitting,
+`streaming.lisp` collects caller-provided chunks behind an explicit finish barrier,
 `incremental-streaming.lisp` carries ordinary consuming-NFA state across
 chunks, and `api-replace.lisp` adds replacement template expansion. The two
 streaming modules deliberately expose different contracts: the first preserves
@@ -100,10 +127,19 @@ the dependency order.
 Compilation selects one of two execution paths.  A regular AST is lowered to
 an NFA and executed by the Pike VM; an AST containing capture-dependent or
 ordered-backtracking constructs is retained and evaluated by
-`advanced-match.lisp`, which also performs bounded search and result selection.
-The advanced path is deliberately bounded by step and nesting limits, and the
-shared match/operation APIs dispatch to it through the same compiled-regex
-value.
+`advanced-match.lisp`. Assertion-specific lookaround handling now lives in
+`advanced-assertions.lisp`, while concat/repetition/group traversal and the
+root-first optimizer now live in `advanced-structure.lisp`. That leaves
+`advanced-match.lisp` focused on special-node semantics such as
+backreferences, recursion, callouts, and control verbs.
+`advanced-search.lisp` reduces each candidate's states to a result, an
+explicit next position, or a stop decision, then owns leftmost candidate
+progression. `advanced-runner.lisp` provides the public timeout boundary for
+that bounded search. Fuzzy matching keeps the same split:
+`fuzzy-runner.lisp` owns bounded state exploration and result ordering, while
+`fuzzy-match.lisp` keeps the public entry points thin. The advanced path is
+deliberately bounded by step and nesting limits, and the shared
+match/operation APIs dispatch to it through the same compiled-regex value.
 
 ## Data flow
 
@@ -203,8 +239,8 @@ reason.
 ## Continuation-passing validation
 
 `scan`, `shortest-match`, and `longest-match` (`api-match.lisp`) -- and
-`regex-set-matches-into` and `regex-set-match-p` (`regex-set.lisp`) -- all
-follow the same shape: validate the regex and the input range, then run
+`regex-set-matches-into` and `regex-set-match-p` (`regex-set-match.lisp`) --
+all follow the same shape: validate the regex and the input range, then run
 `run-pike-vm`/`run-pike-vm-set` under a timeout with slightly different
 keyword arguments. `call-with-validated-match` and
 `call-with-validated-regex-set-match` factor that shape out in
@@ -368,12 +404,15 @@ adjacent, which would not preserve it.
   production code already depends on `cl-parser-kit` and `cl-concurrent-kit`,
   for a boundary
   this project does not actually have.
-- **`cl-codec-kit`** -- evaluated and **not adopted**. `utf8-character-at`/
-  `utf8-character-before` (`text-boundaries.lisp`) are not a general-purpose
-  codec: they decode one scalar at a time from a fixed cursor position while
-  tracking Pike-VM byte-offset validity (`byte-unicode-non-boundary-position-p`),
-  a shape a general encode/decode library does not expose and should not be
-  bent to fit.
+- **`cl-codec-kit`** -- adopted directly in `cl-regex-kit/test` as a
+  test-only UTF-8 oracle, and **not adopted** as a runtime abstraction.
+  `string-to-octets`/`octets-to-string` now generate and round-trip UTF-8 test
+  fixtures without hard-coding byte vectors, but `utf8-character-at`/
+  `utf8-character-before` (`text-boundaries.lisp`) still remain local runtime
+  primitives because they decode one scalar at a time from a fixed cursor
+  position while tracking Pike-VM byte-offset validity
+  (`byte-unicode-non-boundary-position-p`), a shape a general codec API does
+  not expose and should not be bent to fit.
 - **`cl-log-kit`, `cl-process-kit`, `cl-host-kit`, `cl-tty-kit`, `cl-dataflow`,
   and the `cl-cc-*` compiler-construction family** -- surveyed via the org's
   repository list and **not adopted**. Each targets a concern this library

@@ -571,16 +571,6 @@ Rust `Regex::captures_at`.
 Rust `Regex::find_at`. It has the same leftmost-first result and range
 semantics as `scan`.
 
-### `regex-search` and `regex-search-at`
-
-```lisp
-(regex-search regex text &key (start 0) end timeout) => match-result-or-nil
-(regex-search-at regex text start &key end timeout) => match-result-or-nil
-```
-
-Search-terminology aliases for `scan` and `scan-at`, provided for callers who
-prefer "search" vocabulary. Selection and range semantics are identical.
-
 ### `full-match` and `full-match-p`
 
 ```lisp
@@ -745,12 +735,6 @@ buffer across iterations, exactly as `do-captures` does.
 (fuzzy-scan-at regex text start &key end timeout (max-edits 1)
               (state-limit +default-fuzzy-state-limit+))
   => match-result-or-nil
-(fuzzy-search regex text &key (max-edits 1) (start 0) end timeout
-             (state-limit +default-fuzzy-state-limit+))
-  => match-result-or-nil
-(fuzzy-search-at regex text start &key end timeout (max-edits 1)
-                (state-limit +default-fuzzy-state-limit+))
-  => match-result-or-nil
 (fuzzy-match pattern text &key (max-edits 1) (start 0) end timeout
             (state-limit +default-fuzzy-state-limit+))
   => match-result-or-nil
@@ -766,12 +750,9 @@ then chooses the earliest end; the selected distance is available afterward
 through `match-edit-distance`. `state-limit` bounds the NFA states explored
 per candidate start position and defaults to `+default-fuzzy-state-limit+`
 (1,000,000). `fuzzy-scan-at` takes its search start as a required positional
-argument. `fuzzy-search` and `fuzzy-search-at` are discoverable
-search-terminology aliases for `fuzzy-scan` and `fuzzy-scan-at`, with
-identical arguments and results. `fuzzy-match` and `byte-fuzzy-match` compile
-`pattern` when it is not already a matching `regex` and then fuzzy-scan it,
-analogous to `match` and `byte-match`; prefer `fuzzy-scan` when reusing a
-compiled pattern.
+argument. `fuzzy-match` and `byte-fuzzy-match` compile `pattern` when it is
+not already a matching `regex` and then fuzzy-scan it, analogous to `match`
+and `byte-match`; prefer `fuzzy-scan` when reusing a compiled pattern.
 
 **Signals**: `fuzzy-match-unsupported` (`regex-advanced-p` is true for the
 supplied pattern — the advanced executor's ordered-backtracking semantics are
