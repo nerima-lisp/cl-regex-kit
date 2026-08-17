@@ -6,7 +6,7 @@
 (defpackage #:cl-regex-kit/benchmarks
   (:use #:cl)
   (:import-from
-   #:cl-dataflow
+   #:cl-dataflow-kit
    #:make-node
    #:make-pipeline
    #:run-pipeline)

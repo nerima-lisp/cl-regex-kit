@@ -41,13 +41,13 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    cl-prolog = {
-      url = "github:nerima-lisp/cl-prolog/v1.4.3";
+    cl-prolog-kit = {
+      url = "github:nerima-lisp/cl-prolog-kit/v1.5.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    cl-dataflow = {
-      url = "github:nerima-lisp/cl-dataflow/v1.1.1";
+    cl-dataflow-kit = {
+      url = "github:nerima-lisp/cl-dataflow-kit/v1.2.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -97,8 +97,8 @@
       cl-weave,
       cl-json-kit,
       cl-codec-kit,
-      cl-prolog,
-      cl-dataflow,
+      cl-prolog-kit,
+      cl-dataflow-kit,
       cl-parser-kit,
       cl-concurrent-kit,
       cl-cli,
@@ -178,7 +178,7 @@
       toPath = x: /. + builtins.unsafeDiscardStringContext "${x}";
       clJsonKitSource = toPath cl-json-kit;
       clCodecKitSource = toPath cl-codec-kit;
-      clDataflowSource = toPath cl-dataflow;
+      clDataflowSource = toPath cl-dataflow-kit;
 
       clJsonKitPackage =
         ctx:
@@ -199,12 +199,12 @@
       clDataflowPackage =
         ctx:
         ctx.cl.lispDerivation {
-          lispSystem = "cl-dataflow";
-          version = ctx.cl.fromAsdSystem "${clDataflowSource}/cl-dataflow.asd";
+          lispSystem = "cl-dataflow-kit";
+          version = ctx.cl.fromAsdSystem "${clDataflowSource}/cl-dataflow-kit.asd";
           src = ctx.cl.mkLispSource { root = clDataflowSource; };
           lispDependencies = [
             cl-concurrent-kit.packages.${ctx.system}.cl-concurrent-kit
-            cl-prolog.packages.${ctx.system}.cl-prolog
+            cl-prolog-kit.packages.${ctx.system}.cl-prolog-kit
           ];
         };
     in
@@ -250,7 +250,7 @@
         cl-concurrent-kit.packages.${ctx.system}.cl-concurrent-kit
       ];
 
-      # cl-weave, cl-codec-kit, cl-dataflow, cl-json-kit, and cl-cli are
+      # cl-weave, cl-codec-kit, cl-dataflow-kit, cl-json-kit, and cl-cli are
       # test-only ASDF
       # dependencies (the production system's runtime dependencies are
       # cl-parser-kit and cl-concurrent-kit, above): `cl-regex-kit.asd`'s
@@ -259,7 +259,7 @@
       # transitively on cl-cli through its own `:depends-on ("cl-regex-kit"
       # "cl-regex-kit/cli" "cl-weave")`, since
       # it also depends on `cl-regex-kit/benchmark`, which in turn brings
-      # in cl-dataflow and cl-json-kit,
+      # in cl-dataflow-kit and cl-json-kit,
       # `cl-regex-kit/cli` (cli/main.lisp, the
       # cl-regex-kit-grep example) is itself built on cl-cli -- see
       # `packages.cl-regex-kit-grep` below for that same edge on the

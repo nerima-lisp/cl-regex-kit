@@ -121,7 +121,7 @@ Without Nix, put the repository where ASDF can find it and evaluate
 test system also needs [`cl-weave`](https://github.com/nerima-lisp/cl-weave),
 [`cl-json-kit`](https://github.com/nerima-lisp/cl-json-kit),
 [`cl-codec-kit`](https://github.com/nerima-lisp/cl-codec-kit), and
-[`cl-dataflow`](https://github.com/nerima-lisp/cl-dataflow),
+[`cl-dataflow-kit`](https://github.com/nerima-lisp/cl-dataflow-kit),
 and the optional command-line system needs
 [`cl-cli`](https://github.com/nerima-lisp/cl-cli).
 
@@ -212,7 +212,7 @@ with repository-local declarative case macros for the grep/byte matrix tests.
 `nix run .#test` provides the required dependencies; direct
 `sbcl --script run-tests.lisp` also requires ASDF to resolve
 `cl-parser-kit`, `cl-concurrent-kit`, `cl-weave`, `cl-json-kit`,
-`cl-codec-kit`, `cl-dataflow`, and `cl-cli`.
+`cl-codec-kit`, `cl-dataflow-kit`, and `cl-cli`.
 The suite combines focused examples with shrinkable property tests and bounded
 parser fuzzing, so failures retain a minimal reproducible input.
 `nix flake check -L` recompiles the production sources with SBCL's `sb-cover`

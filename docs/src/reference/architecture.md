@@ -413,7 +413,7 @@ adjacent, which would not preserve it.
   position while tracking Pike-VM byte-offset validity
   (`byte-unicode-non-boundary-position-p`), a shape a general codec API does
   not expose and should not be bent to fit.
-- **`cl-log-kit`, `cl-process-kit`, `cl-host-kit`, `cl-tty-kit`, `cl-dataflow`,
+- **`cl-log-kit`, `cl-process-kit`, `cl-host-kit`, `cl-tty-kit`, `cl-dataflow-kit`,
   and the `cl-cc-*` compiler-construction family** -- surveyed via the org's
   repository list and **not adopted**. Each targets a concern this library
   does not have: structured logging, subprocess execution, filesystem/path
