@@ -178,7 +178,7 @@
       toPath = x: /. + builtins.unsafeDiscardStringContext "${x}";
       clJsonKitSource = toPath cl-json-kit;
       clCodecKitSource = toPath cl-codec-kit;
-      clDataflowSource = toPath cl-dataflow-kit;
+      clDataflowKitSource = toPath cl-dataflow-kit;
 
       clJsonKitPackage =
         ctx:
@@ -196,12 +196,12 @@
           src = ctx.cl.mkLispSource { root = clCodecKitSource; };
         };
 
-      clDataflowPackage =
+      clDataflowKitPackage =
         ctx:
         ctx.cl.lispDerivation {
           lispSystem = "cl-dataflow-kit";
-          version = ctx.cl.fromAsdSystem "${clDataflowSource}/cl-dataflow-kit.asd";
-          src = ctx.cl.mkLispSource { root = clDataflowSource; };
+          version = ctx.cl.fromAsdSystem "${clDataflowKitSource}/cl-dataflow-kit.asd";
+          src = ctx.cl.mkLispSource { root = clDataflowKitSource; };
           lispDependencies = [
             cl-concurrent-kit.packages.${ctx.system}.cl-concurrent-kit
             cl-prolog-kit.packages.${ctx.system}.cl-prolog-kit
@@ -272,7 +272,7 @@
         (ctx.cl.fromDerivation { drv = cl-weave.packages.${ctx.system}.cl-weave; })
         (clJsonKitPackage ctx)
         (clCodecKitPackage ctx)
-        (clDataflowPackage ctx)
+        (clDataflowKitPackage ctx)
         cl-cli.packages.${ctx.system}.cl-cli
       ];
 
@@ -337,7 +337,7 @@
             runner = "run-benchmarks.lisp";
             lispDependencies = [
               ctx.package
-              (clDataflowPackage ctx)
+              (clDataflowKitPackage ctx)
               (clJsonKitPackage ctx)
             ];
             timeoutSeconds = 120;
