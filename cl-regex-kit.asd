@@ -154,7 +154,7 @@
 
 (asdf:defsystem "cl-regex-kit/benchmark"
   :description "Benchmark system for cl-regex-kit"
-  :depends-on ("cl-regex-kit" "cl-dataflow" "cl-json-kit")
+  :depends-on ("cl-regex-kit" "cl-dataflow-kit" "cl-json-kit")
   :pathname "benchmarks"
   :serial t
   :components ((:file "package") (:file "suite")))
