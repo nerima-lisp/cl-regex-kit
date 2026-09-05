@@ -1,29 +1,7 @@
-;;;; src/regex-grammar.lisp
-;;;;
-;;;; PARSE-REGEX and the top-level grammar (alternation, concatenation,
-;;;; repetition, groups, inline flags, atoms) over the token vector
-;;;; TOKENIZE-REGEX-PATTERN produces. Character-class bodies are
-;;;; regex-grammar-classes.lisp's concern.
-;;;;
-;;;; Shared parser state -- position in the token stream, accumulated flags,
-;;;; capture bookkeeping -- lives in the dynamically-bound special variables
-;;;; DEFVAR'd in parser-syntax.lisp, exactly as it did when this parser
-;;;; walked characters directly (see the original rationale, preserved here:
-;;;; binding them once in PARSE-REGEX and letting every other function read
-;;;; and mutate them directly is the same technique CL-PPCRE's recursive-
-;;;; descent parser uses). Swapping the character scanner for
-;;;; CL-PARSER-KIT's token/span model changes what *REGEX-TOKEN-POSITION*
-;;;; indexes and moves every escape/hex/octal/Unicode-property/POSIX-class
-;;;; scan into the tokenizer, but does not change this shape: this grammar's
-;;;; alternation/concatenation/repetition tiers have no genuine backtracking
-;;;; ambiguity (every branch point resolves on one token of lookahead), so
-;;;; they stay hand-written recursive descent over the token vector rather
-;;;; than combinator pipelines -- CL-PARSER-KIT's own tokenizer/pratt/
-;;;; combinator layers are a poor fit for a context-sensitive, single-
-;;;; lookahead, error-position-precise grammar like this one, per its own
-;;;; documented design center (token-stream languages with real operator
-;;;; precedence). What CL-PARSER-KIT contributes here is its TOKEN/SPAN data
-;;;; model and the tokenizer built on it.
+;;;; Parse the token stream into the regex AST.
+
+;;;; Parser state is dynamically bound for each parse. Character-class bodies
+;;;; are implemented in regex-grammar-classes.lisp.
 (in-package #:cl-regex-kit)
 
 (defun parse-atom ()

@@ -1,15 +1,7 @@
-;;;; src/regex-tokenizer-escapes.lisp
-;;;;
-;;;; Escape-sequence decoding shared by the top-level and character-class
-;;;; tokenizer dispatch (regex-tokenizer.lisp): hex/octal/Unicode-scalar
-;;;; escapes, \p{...}/\P{...} Unicode properties, and \b{...} word-boundary
-;;;; names. Each function here scans PATTERN from POSITION and returns
-;;;; (values decoded-value next-position) -- pure lexical decoding, with no
-;;;; dependency on live parser flags. Whatever legality a decoded escape has
-;;;; under the *current* byte-mode/Unicode-flag state (e.g. whether \p{...}
-;;;; is allowed at all) is judged later by the grammar layer, since that
-;;;; state can change mid-pattern via inline (?flags) groups and so cannot be
-;;;; resolved during this single up-front tokenizing pass.
+;;;; Decode escape sequences for the regex tokenizer.
+
+;;;; Lexical decoding is independent of parser flags; the grammar validates
+;;;; each decoded escape against the flags active at its position.
 (in-package #:cl-regex-kit)
 
 (defun tokenizer-fail (pattern position reason)

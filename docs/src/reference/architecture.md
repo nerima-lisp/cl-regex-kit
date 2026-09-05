@@ -166,9 +166,8 @@ vector rather than
 `cl-parser-kit` combinator pipelines, because this grammar has no genuine
 backtracking ambiguity -- every branch point resolves on one token of
 lookahead -- which is also why `cl-parser-kit`'s tokenizer-rule and
-Pratt/expression-parser layers are not used: see [Packages evaluated from the
-`nerima-lisp` org](#packages-evaluated-from-the-nerima-lisp-org) below for
-what `cl-parser-kit` does contribute.
+Pratt/expression-parser layers are not used. `cl-parser-kit` contributes the
+token/span model and tokenizer used by these grammar files.
 `unicode-property-data.lisp`, `unicode-extra-binary-property-data.lisp`,
 `unicode-age-data.lisp`, and `unicode-binary-property-range-data.lisp` own
 every Unicode alias list and static range table this engine consults;
@@ -360,68 +359,3 @@ re-examined as the start of a fresh `&&`. `regex-grammar-classes.lisp`'s
 `CLASS-SET-OPERATOR` reproduces that boundary-only check itself rather than
 having the tokenizer match `&&`/`~~`/`--` wherever they happen to be
 adjacent, which would not preserve it.
-
-## Packages evaluated from the `nerima-lisp` org
-
-- **`cl-weave`** -- adopted directly as the test-only dependency (see
-  `cl-regex-kit/test` in the `.asd`); this project's fuzz and property tests
-  use its `it-fuzz`/`it-property`/`gen-*` generators as-is, with no adapter
-  layer.
-- **`cl-nix-forge`** -- adopted directly in `flake.nix`. `mkPackageFlake`
-  generates the package derivation, the `run-tests.lisp` check with its
-  timeout, the treefmt-backed formatting gate, the mkdocs site and its check,
-  `apps.test`/`apps.default`, and the dev shell, replacing what this file used
-  to hand-write. `cl-weave` reaches the test system through
-  `lispCheckDependencies` (resolved only under `doCheck`; the production
-  system itself depends on `cl-parser-kit` and `cl-concurrent-kit`), and the
-  percentage-threshold coverage gate is one `extraOutputs` check built on
-  `mkCommandCheck`, since threshold enforcement is domain-specific to this
-  project rather than something the generic preset provides.
-- **`cl-parser-kit`** -- adopted as the production parser toolkit (see [From
-  a character scanner to a `cl-parser-kit` token stream](#from-a-character-scanner-to-a-cl-parser-kit-token-stream)
-  above), and a real, non-test-only dependency of `cl-regex-kit` itself
-  (`cl-regex-kit.asd`'s `:depends-on`, `flake.nix`'s `lispDependencies`) --
-  the first this project has. Its `token`/`span` structs and
-  `tokenize-regex-pattern`'s hand-rolled scanning replace the character-level
-  `peek`/`take` cursor directly, with no adapter layer between them and the
-  grammar; its combinator/Pratt layer is deliberately not used, for the
-  reasons given above.
-- **`cl-cli`** -- adopted directly for `cl-regex-kit-grep` (`cli/`), a small
-  `grep`-alike over `compile-regex`/`is-match-p` that exercises the library
-  as a real command-line tool. `cl-regex-kit/cli` is its own `.asd` system
-  (`:depends-on ("cl-regex-kit" "cl-cli")`, `:build-operation "program-op"`)
-  so the core `cl-regex-kit` system's dependency list stays exactly
-  `("cl-concurrent-kit" "cl-parser-kit")` -- this is a separate delivery, not a new dependency of
-  the library. `flake.nix` builds it with `cl.mkExecutable`, the same
-  `packages.<name>` shape `mkPackageFlake` already produces for the library
-  itself. Used directly, no adapter: `make-app`/`make-option`/
-  `make-positional`/`run-app` are `cl-cli`'s own documented API.
-- **`cl-boundary-kit`** -- evaluated and **not adopted**. It provides fake
-  test doubles for I/O-shaped boundaries (clocks, filesystems, networks); this
-  library's only "boundary" is `sb-ext:with-timeout` in `call-with-timeout`,
-  which is a real-time interrupt mechanism, not a value a fake clock can
-  drive. Introducing it would add a runtime dependency to a system whose
-  production code already depends on `cl-parser-kit` and `cl-concurrent-kit`,
-  for a boundary
-  this project does not actually have.
-- **`cl-codec-kit`** -- adopted directly in `cl-regex-kit/test` as a
-  test-only UTF-8 oracle, and **not adopted** as a runtime abstraction.
-  `string-to-octets`/`octets-to-string` now generate and round-trip UTF-8 test
-  fixtures without hard-coding byte vectors, but `utf8-character-at`/
-  `utf8-character-before` (`text-boundaries.lisp`) still remain local runtime
-  primitives because they decode one scalar at a time from a fixed cursor
-  position while tracking Pike-VM byte-offset validity
-  (`byte-unicode-non-boundary-position-p`), a shape a general codec API does
-  not expose and should not be bent to fit.
-- **`cl-log-kit`, `cl-process-kit`, `cl-host-kit`, `cl-tty-kit`, `cl-dataflow-kit`,
-  and the `cl-cc-*` compiler-construction family** -- surveyed via the org's
-  repository list and **not adopted**. Each targets a concern this library
-  does not have: structured logging, subprocess execution, filesystem/path
-  abstraction, terminal UI, and general dataflow-graph or compiler
-  infrastructure, respectively. `cl-regex-kit` is a pure, deterministic
-  computation over strings and octet vectors with no I/O, no subprocesses, and
-  no interactive surface outside the separate `cl-regex-kit/cli` system;
-  adopting any of these would be exactly the "avoid adding an adapter merely to
-  force a dependency into the design" principle's counter-example -- a
-  dependency bent to a use it wasn't designed for, rather than one that already
-  fits.

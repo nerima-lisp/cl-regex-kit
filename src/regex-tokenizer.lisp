@@ -1,47 +1,8 @@
-;;;; src/regex-tokenizer.lisp
-;;;;
-;;;; Turns a pattern string into a (VECTOR CL-PARSER-KIT:TOKEN) that
-;;;; regex-grammar.lisp/regex-grammar-classes.lisp parse with cl-parser-kit's
-;;;; combinators. A single forward pass, tracking only whether it is
-;;;; currently inside a `[...]` character class (CLASS-DEPTH) -- the one
-;;;; piece of context regex syntax's lexical rules genuinely depend on: `-`,
-;;;; `]`, `^`, POSIX classes, and set operators are meaningful only there, and
-;;;; `\b` denotes a backspace character inside a class but a word boundary
-;;;; outside one.
-;;;;
-;;;; Everything else this grammar's context-sensitivity touches -- the live
-;;;; Unicode flag toggled by inline `(?u)`/`(?-u)`, byte-mode legality,
-;;;; case-insensitivity -- depends on *parser state reached along a
-;;;; particular parse path*, not on lexical position, and so cannot be
-;;;; resolved in this one-pass, flag-independent tokenizer; every ESCAPE
-;;;; token instead carries a fully-decoded but *unvalidated* shape (a plist
-;;;; naming its kind and raw payload), leaving flag-dependent legality checks
-;;;; and AST construction to the grammar layer, exactly where the live flags
-;;;; it needs are in scope.
-;;;;
-;;;; Two fixed-for-the-whole-parse options, BYTE-MODE and OCTAL, are taken as
-;;;; tokenizer arguments (never mutated mid-pattern, unlike the inline
-;;;; flags) so their two lexically-decidable legality checks -- `\C` outside
-;;;; byte mode, and octal escapes when disabled -- can be raised here, right
-;;;; where the offending token is scanned.
-;;;;
-;;;; Extended (whitespace-insensitive) mode is NOT handled here: since its
-;;;; flag is itself one of the live, inline-mutable flags, deciding what to
-;;;; skip is a grammar-layer concern -- see SKIP-EXTENDED-TRIVIA in
-;;;; regex-grammar.lisp, the token-stream analogue of the original parser's
-;;;; SKIP-EXTENDED-SYNTAX. Every whitespace character therefore still
-;;;; becomes an ordinary :CHAR token here, unconditionally.
-;;;;
-;;;; Class set operators (`&&`, `~~`, `--`) are likewise NOT resolved here,
-;;;; even though they are two-character and lexically unambiguous: the
-;;;; original parser only ever tests for them at true item-boundary
-;;;; positions (the top of its union loop), never mid-item, so e.g. the
-;;;; second `&` consumed as a range endpoint in `[a-&&b]` is never
-;;;; re-examined as the start of a fresh `&&`. A tokenizer that matched `&&`
-;;;; wherever the two characters happen to be adjacent would not preserve
-;;;; that boundary-only behavior, so set-operator recognition stays in
-;;;; regex-grammar-classes.lisp, at the same boundaries the original
-;;;; PARSE-UNION/PARSE-EXPRESSION checked them.
+;;;; Tokenize regex patterns into cl-parser-kit tokens.
+
+;;;; The tokenizer decodes lexical escapes but leaves parser-state-dependent
+;;;; validation and AST construction to the grammar. Character-class set
+;;;; operators are recognized by the class grammar at item boundaries.
 (in-package #:cl-regex-kit)
 
 (defun posix-class-lookahead-p (pattern position)
