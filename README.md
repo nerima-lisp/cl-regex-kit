@@ -103,7 +103,7 @@ a set containing such members does not promise one input scan for every member.
 ```nix
 # flake.nix
 inputs.cl-regex-kit = {
-  url = "github:nerima-lisp/cl-regex-kit/v2.0.0";
+  url = "github:nerima-lisp/cl-regex-kit/v2.1.0";
   inputs.nixpkgs.follows = "nixpkgs";
 };
 ```

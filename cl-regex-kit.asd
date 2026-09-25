@@ -12,7 +12,7 @@
   :author "takeokunn <bararararatty@gmail.com>"
   :maintainer "takeokunn <bararararatty@gmail.com>"
   :license "MIT"
-  :version "2.0.0"
+  :version "2.1.0"
   :homepage "https://github.com/nerima-lisp/cl-regex-kit"
   :bug-tracker "https://github.com/nerima-lisp/cl-regex-kit/issues"
   :source-control (:git "https://github.com/nerima-lisp/cl-regex-kit.git")
@@ -87,7 +87,7 @@
   :author "takeokunn <bararararatty@gmail.com>"
   :maintainer "takeokunn <bararararatty@gmail.com>"
   :license "MIT"
-  :version "2.0.0"
+  :version "2.1.0"
   :homepage "https://github.com/nerima-lisp/cl-regex-kit"
   :bug-tracker "https://github.com/nerima-lisp/cl-regex-kit/issues"
   :source-control (:git "https://github.com/nerima-lisp/cl-regex-kit.git")
@@ -104,7 +104,7 @@
   :author "takeokunn <bararararatty@gmail.com>"
   :maintainer "takeokunn <bararararatty@gmail.com>"
   :license "MIT"
-  :version "2.0.0"
+  :version "2.1.0"
   :homepage "https://github.com/nerima-lisp/cl-regex-kit"
   :bug-tracker "https://github.com/nerima-lisp/cl-regex-kit/issues"
   :source-control (:git "https://github.com/nerima-lisp/cl-regex-kit.git")
