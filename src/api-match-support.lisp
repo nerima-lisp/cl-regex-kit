@@ -102,15 +102,29 @@ not substrings, so it can be reused safely across different input texts."
           (error 'regex-timeout :seconds timeout)))
       (funcall thunk)))
 
-(defun call-with-validated-match (regex text start end timeout thunk)
+(defun call-with-validated-match (regex text start end timeout thunk &key (prefilter-p t))
   "Validate REGEX/TEXT/START/END, then invoke THUNK with the validated LIMIT
 under TIMEOUT, continuation-passing style: THUNK performs the actual VM run
 and returns its MATCH-RESULT (or NIL), which this function returns unchanged.
 Shared by every SCAN-shaped entry point so each one states only how it wants
-RUN-PIKE-VM invoked, not how to get there."
+RUN-PIKE-VM invoked, not how to get there.
+
+When PREFILTER-P (the default), consult REGEX-LITERAL-PREFILTER-BLOCKS-P
+before calling THUNK: when REGEX's required literals prove no EXACT match can
+occupy [START, LIMIT), return NIL without running THUNK at all. This is why
+every exact SCAN-shaped entry point gets the prefilter for free by going
+through this function, rather than each one checking it independently. Pass
+PREFILTER-P NIL for a caller whose THUNK tolerates a match that does not
+literally contain REGEX-REQUIRED-LITERALS -- bounded fuzzy matching, notably,
+since an edit can remove or alter a character the exact matcher would have
+required."
   (check-type regex regex)
   (let ((limit (validate-text-range regex text start end)))
-    (call-with-timeout timeout (lambda () (funcall thunk limit)))))
+    (call-with-timeout
+     timeout
+     (lambda ()
+       (unless (and prefilter-p (regex-literal-prefilter-blocks-p regex text start limit))
+         (funcall thunk limit))))))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defmacro with-pike-vm-match ((result regex text start end timeout &rest vm-keys) &body body)

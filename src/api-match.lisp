@@ -95,9 +95,30 @@ leftmost-first semantics. Return a MATCH-RESULT, or NIL if no match exists."
     result))
 
 (defun is-match-p (regex text &key (start 0) end timeout)
-  "Return true when REGEX matches TEXT within [START, END)."
-  (with-pike-vm-match (result regex text start end timeout :boolean-p t)
-    (not (null result))))
+  "Return true when REGEX matches TEXT within [START, END).
+
+When REGEX's program is eligible for the lazy DFA (see LAZY-DFA-ELIGIBLE-P),
+this dispatches to RUN-LAZY-DFA-BOOLEAN instead of RUN-PIKE-VM: match
+detection alone needs no capture slots, so the cheaper boolean path applies
+here specifically, while SCAN/CAPTURES/LONGEST-MATCH keep using the Pike VM
+to report where a match starts and ends."
+  (check-type regex regex)
+  (call-with-validated-match
+   regex text start end timeout
+   (lambda (limit)
+     (let ((dfa (regex-lazy-dfa regex)))
+       (cond
+         (dfa (run-lazy-dfa-boolean dfa text start limit))
+         ((regex-advanced-p regex)
+          (not (null (run-advanced-regex regex text
+                                         :start start :end limit
+                                         :never-newline-p (regex-never-newline-p regex)))))
+         (t
+          (not (null (run-pike-vm (regex-program regex) text
+                                  :start start :end limit
+                                  :slot-count (regex-slot-count regex)
+                                  :never-newline-p (regex-never-newline-p regex)
+                                  :boolean-p t)))))))))
 
 (define-forwarding-wrapper is-match-at
     (regex text start &key end timeout)

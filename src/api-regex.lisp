@@ -22,8 +22,17 @@
    (source :initarg :source :reader regex-source-value)
    (never-newline-p :initarg :never-newline-p :reader regex-never-newline-p
                     :initform nil)
-   (byte-mode-p :initarg :byte-mode-p :reader byte-regex-p :initform nil))
-  (:documentation "A compiled regular expression with a safe NFA or advanced AST execution path."))
+   (byte-mode-p :initarg :byte-mode-p :reader byte-regex-p :initform nil)
+   (%lazy-dfa :initform :unbuilt
+              :documentation "REGEX-LAZY-DFA's cache; :UNBUILT until first use, then a LAZY-DFA or NIL.")
+   (%required-literal-needles :initform :unbuilt
+                              :documentation "REGEX-REQUIRED-LITERAL-NEEDLES's cache; :UNBUILT until first use."))
+  (:documentation "A compiled regular expression with a safe NFA or advanced AST execution path.
+
+The two %-prefixed slots are internal, lazily-built performance caches with
+no initarg and no accessor: they hold no part of REGEX's public identity,
+are computed deterministically from the other slots, and never change what
+any public function reports -- only how quickly it can."))
 
 (defun regex-p (object)
   "Return true when OBJECT is a compiled REGEX."

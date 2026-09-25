@@ -31,6 +31,7 @@
    #:regex-advanced-nest-limit
    #:regex-never-newline-p
    #:regex-callout
+   #:regex-required-literals
    ;; Multi-pattern compilation
    #:compile-regex-set
    #:compile-byte-regex-set

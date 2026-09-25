@@ -90,6 +90,16 @@ match leftmost-first, greedy semantics -- so the recorded slots are always
 consistent with what a backtracking engine would have found by exploring in
 priority order.
 
+Because *which states are reachable* is exactly the information a boolean
+match/no-match answer needs -- and nothing more -- `is-match-p`/`is-match-at`
+consult a bounded, lazily-built DFA cache over that same reachable-state set
+for eligible programs, memoizing the subset-construction transitions a plain
+NFA walk would otherwise recompute on every call. See
+[Architecture](../reference/architecture.md#literal-prefilter-and-the-lazy-dfa)
+for exactly which programs qualify and how the cache is bounded; every other
+public function, and every program a boundary or byte-mode Unicode
+instruction disqualifies, keeps using the thread-set simulation above.
+
 ## Comparison with backtracking
 
 A textbook backtracking engine (and most engines you meet day to day: Perl,

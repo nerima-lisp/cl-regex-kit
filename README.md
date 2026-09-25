@@ -103,7 +103,7 @@ a set containing such members does not promise one input scan for every member.
 ```nix
 # flake.nix
 inputs.cl-regex-kit = {
-  url = "github:nerima-lisp/cl-regex-kit/v2.0.0";
+  url = "github:nerima-lisp/cl-regex-kit/v2.1.0";
   inputs.nixpkgs.follows = "nixpkgs";
 };
 ```
@@ -182,6 +182,14 @@ The ASDF system loads the implementation in these broad layers:
   API. `advanced-match.lisp` contains the bounded AST evaluator, while
   `advanced-runner.lisp` owns the public timeout boundary and leftmost-result
   entry point.
+- **Internal matching fast paths:** `literal-prefilter.lisp` derives
+  conservative required literals (`regex-required-literals`) and the
+  existence prefilter `scan`/`all-matches`/`is-match-p` consult before
+  running any matcher; `lazy-dfa.lisp` provides a bounded, per-`regex`
+  subset-construction DFA cache `is-match-p`/`is-match-at` consult for match
+  detection, falling back to the Pike VM's boolean simulation whenever a
+  program needs captures or is not eligible. See
+  [Architecture](https://nerima-lisp.github.io/cl-regex-kit/reference/architecture/#literal-prefilter-and-the-lazy-dfa).
 
 Unicode property domains depend on SBCL's Unicode tables. Enumerating finite
 runtime domains also inspects internal `SB-KERNEL` function return-type

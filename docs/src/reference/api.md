@@ -295,6 +295,48 @@ slot reader.
 
 See also: [`compile-regex`](api.md#compile-regex)
 
+### `regex-required-literals`
+
+```lisp
+(cl-regex-kit:regex-required-literals regex)
+  => list-of-strings-or-nil
+```
+
+Returns literal substrings that every match of `regex` must contain,
+longest first, or `nil` when no literal requirement can be conservatively
+derived. Each returned string is guaranteed present in any text `regex`
+matches: derivation only follows mandatory, case-sensitive,
+non-alternated positions of the compiled pattern -- concatenation,
+non-optional groups and repetitions (`min >= 1`), atomic groups, and a
+positive lookahead's child -- and contributes nothing, rather than an
+unsound guess, at alternation, optional (`min` `0`) repetition,
+case-insensitive literals, character classes, backreferences, negative
+assertions, lookbehind, and subroutines. `scan`, `all-matches`, and
+`is-match-p` already consult this internally as an existence prefilter
+before running the matcher; call it directly to inspect what a pattern's
+own literal requirement is, for example to explain why a search plan skips
+a range of input.
+
+**Returns**: a fresh list of strings, longest first, or `nil`. For a byte
+regex, each string's `char-code`s are the required octet values, not
+Unicode scalar values.
+
+**Signals**: `type-error` when `regex` is not a compiled pattern.
+
+**Example**:
+
+```lisp
+(cl-regex-kit:regex-required-literals (cl-regex-kit:compile-regex "abc[0-9]+def"))
+;; => ("abc" "def")
+(cl-regex-kit:regex-required-literals (cl-regex-kit:compile-regex "cat|dog"))
+;; => NIL
+(cl-regex-kit:regex-required-literals (cl-regex-kit:compile-regex "(?i)needle"))
+;; => NIL
+```
+
+See also: [`compile-regex`](api.md#compile-regex), [`scan`](api.md#scan),
+[`is-match-p`](api.md#is-match-p)
+
 ### `regex-capture-locations`
 
 ```lisp
@@ -535,7 +577,12 @@ regexes and returns `nil` if no match exists.
 ```
 
 Boolean form of `scan`, without constructing an application-level branch on a
-`match-result`.
+`match-result`. When `regex`'s program needs no capture slots and contains
+no zero-width or byte-mode Unicode-decoding instruction, `is-match-p`
+answers from a lazily-built, per-`regex` DFA cache instead of the Pike VM;
+see [Architecture](../reference/architecture.md) for exactly which programs
+qualify. The result is identical either way -- this only changes how the
+answer is computed, never what it is.
 
 ### `is-match-at`
 

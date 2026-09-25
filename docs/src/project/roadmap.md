@@ -69,6 +69,16 @@ one input unit after the current match's start.
     `fuzzy-match`, and `byte-fuzzy-match`, with explicit edit
     and state limits and a `fuzzy-match-unsupported` condition for advanced
     patterns; `match-edit-distance` reports the selected edit count.
+15. `regex-required-literals` conservatively derives literal substrings every
+    match of a compiled pattern must contain; `scan`, `all-matches`, and
+    `is-match-p` consult the same derivation internally as an existence
+    prefilter before running the matcher. `is-match-p`/`is-match-at`
+    additionally consult a bounded, lazily-built subset-construction DFA
+    cache for match detection on regular (non-advanced, non-zero-width,
+    non-byte-Unicode-decoding) programs, falling back to the Pike VM's
+    boolean simulation for every other program; captures always come from
+    the Pike VM or the advanced executor. See
+    [Architecture](../reference/architecture.md#literal-prefilter-and-the-lazy-dfa).
 
 ## Explicit non-goals
 
@@ -134,3 +144,14 @@ patterns signal `fuzzy-match-unsupported`.
   advanced ordered-backtracking constructs, and overlapping incremental
   traversal each need a separately specified contract before they can be
   supported without weakening correctness
+- `regex-required-literals` deliberately does not attempt alternation
+  branches (no common-substring analysis across `a|b`), a character class
+  reduced to a single member, or a case-insensitive literal folded to its
+  case-invariant forms; each would still need to stay conservative, and none
+  changes the prefilter's soundness, only its pruning power
+- The lazy DFA is consulted only for `is-match-p`/`is-match-at`. Extending it
+  to report a match's end position (for `scan`/`shortest-match` without
+  captures) is possible in principle -- an accepting state's PC set already
+  determines it -- but needs its own correctness argument for interaction
+  with leftmost-first branch priority before it can replace any part of
+  `run-pike-vm`

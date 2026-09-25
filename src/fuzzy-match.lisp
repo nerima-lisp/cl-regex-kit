@@ -32,7 +32,12 @@ MATCH-EDIT-DISTANCE."
                      for candidate =
                        (fuzzy-match-at-position
                         regex text position limit max-edits state-limit)
-                     when candidate return candidate))))))
+                     when candidate return candidate)))
+           ;; The literal prefilter assumes an exact match; sound only when
+           ;; MAX-EDITS is 0, where the thunk above runs an exact RUN-PIKE-VM.
+           ;; A positive MAX-EDITS tolerates a match that omits or alters a
+           ;; required literal's characters, so the prefilter must not run.
+           :prefilter-p (zerop max-edits))))
     (when result
       (setf (match-result-group-names result) (regex-group-names regex)))
     result))
