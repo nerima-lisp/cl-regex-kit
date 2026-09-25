@@ -28,7 +28,7 @@
    #:regex-p #:byte-regex-p #:regex-group-count #:regex-capture-count #:regex-static-capture-count
    #:regex-capture-names #:regex-group-index #:regex-source
    #:regex-advanced-p #:regex-advanced-step-limit #:regex-advanced-nest-limit
-   #:regex-never-newline-p
+   #:regex-never-newline-p #:regex-required-literals
    #:compile-regex-set #:compile-byte-regex-set #:regex-set #:byte-regex-set
    #:regex-set-p #:byte-regex-set-p #:regex-set-patterns
    #:regex-set-count #:regex-set-empty-p

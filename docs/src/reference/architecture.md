@@ -56,6 +56,13 @@ src/
   pike-vm-set.lisp
                   RUN-PIKE-VM-SET: merged INST program -> matching indexes
   api-regex.lisp  compiled-regex value object and metadata accessors
+  literal-prefilter.lisp
+                  REGEX-REQUIRED-LITERALS's conservative AST walk and the
+                  internal existence prefilter CALL-WITH-VALIDATED-MATCH
+                  consults before running any matcher
+  lazy-dfa.lisp   on-demand subset-construction DFA cache for IS-MATCH-P,
+                  bounded per REGEX and falling back to RUN-PIKE-VM-BOOLEAN's
+                  NFA step for any program it cannot represent
   api-compile.lisp
                   public compilation entry points, literal macros, and
                   compile-time validation
@@ -218,6 +225,66 @@ against the input, so matching the same pattern against many strings pays the
 compilation cost once instead of once per call -- this is why `match` is
 documented as a convenience wrapper and `compile-regex` + `scan` is the
 recommended path for repeated matching.
+
+## Literal prefilter and the lazy DFA
+
+`compile-regex`/`compile-byte-regex` still compile every regular pattern to
+the one Thompson-constructed `inst` program described above; the additions
+in `literal-prefilter.lisp` and `lazy-dfa.lisp` are internal fast paths in
+front of that program, not a second compiler.
+
+`literal-prefilter.lisp`'s `required-literals-for-node` walks a compiled
+`regex`'s AST for literal substrings that every match must contain,
+following only mandatory, case-sensitive, non-alternated positions --
+concatenation, non-optional groups and repetitions, atomic groups, and a
+positive lookahead's child -- and contributing nothing at alternation,
+optional repetition, case-insensitive literals, character classes,
+backreferences, negative assertions, lookbehind, and subroutines, rather
+than an unsound guess. `regex-required-literals` exposes the result
+publicly; `regex-required-literal-needles` caches it, pre-converted to
+`text`'s element domain, on the `regex` object for internal use.
+`call-with-validated-match` (`api-match-support.lisp`) consults
+`regex-literal-prefilter-blocks-p` before invoking its `thunk`, so every
+`scan`-shaped entry point -- `scan`, `captures`, `shortest-match`,
+`longest-match`, `scan-captures-into`, and `is-match-p` -- and everything
+built on them, including `all-matches`, skip the Pike VM, the lazy DFA, and
+the advanced executor entirely for an input range the required literals
+prove cannot match.
+
+`lazy-dfa.lisp` builds a bounded subset-construction cache per `regex`,
+consulted only from `is-match-p`/`is-match-at`. A DFA state is a closed set
+of live program counters; because an unanchored search reseeds a fresh
+thread at program counter 0 at every position, that reseed folds into the
+transition function itself, making each transition a pure function of
+`(state, input element)` and therefore cacheable. `lazy-dfa-eligible-p`
+restricts this to programs a fixed-width `(state, element)` table can
+represent soundly: no anchor or word/line boundary instruction (`:bol`,
+`:eol`, `:bos`, `:eos`, `:boundary`, `:non-boundary`, `:word-start`,
+`:word-end`, `:word-start-half`, `:word-end-half`), since those read text on
+both sides of the current position, and no byte-mode Unicode-aware
+instruction (`:line-break`, or a `:char`/`:class`/`:any` instruction with
+`instruction-unicode-p` true), since those decode a variable 1-4-octet run
+per step. Every other regular (non-advanced) program qualifies, including
+character-mode Unicode literals and classes, since a character-mode element
+is always exactly one `char`, and byte-mode programs compiled with
+`:unicode nil`. `regex-lazy-dfa` builds and caches the `lazy-dfa` lazily on
+first use; a state beyond `+lazy-dfa-max-states+` is still computed
+correctly, by the same `pike-vm-boolean-closure` epsilon-closure step
+`run-pike-vm-boolean` uses per position, it is simply not retained, so
+exceeding the bound degrades to ordinary per-step NFA work rather than
+growing the cache without limit. A `regex`'s lazy DFA and its required
+literal needles are internal, lazily-built caches: a benign race under
+concurrent first use may build either twice, since a freshly built result
+is self-contained and safe to publish regardless of which build wins. The
+DFA's shared mutable state and transition tables are additionally guarded
+by a lock per `lazy-dfa`, since a compiled `regex` is meant to be reused
+concurrently and those tables keep growing after the cache is first built.
+
+Both additions are pure performance optimizations: neither changes any
+public function's return value, only how quickly a definite non-match or a
+boolean match answer is reached. Captures always come from the Pike VM or
+the advanced executor; the lazy DFA never reports a capture and is never
+consulted by any function that returns one.
 
 ## Condition hierarchy
 
