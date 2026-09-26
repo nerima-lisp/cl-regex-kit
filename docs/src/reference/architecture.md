@@ -52,7 +52,9 @@ src/
   pike-vm-closure.lisp
                   shared epsilon-closure traversal
   pike-vm-capture.lisp
-                  RUN-PIKE-VM: INST program -> MATCH-RESULT
+                  RUN-PIKE-VM: INST program -> MATCH-RESULT, and the
+                  capture-free RUN-PIKE-VM-BOOLEAN, over reusable thread
+                  queues
   pike-vm-set.lisp
                   RUN-PIKE-VM-SET: merged INST program -> matching indexes
   api-regex.lisp  compiled-regex value object and metadata accessors
@@ -285,6 +287,53 @@ public function's return value, only how quickly a definite non-match or a
 boolean match answer is reached. Captures always come from the Pike VM or
 the advanced executor; the lazy DFA never reports a capture and is never
 consulted by any function that returns one.
+
+## Pike VM thread lists
+
+`run-pike-vm` keeps one priority-ordered list of live threads per input
+position. Leftmost-first selection walks that list in order: a `:match`
+thread becomes the current best and every lower-priority thread at that
+position is dropped, while the higher-priority threads ahead of it keep
+running, because one of them can still reach a preferred match. In
+`(?:[^x]*r)?P` against `"P x"`, the optional group's thread outlives the `P`
+match at offset 0 and then dies, so the recorded match stands. No new start
+position is seeded once a match is recorded, and the run ends when no thread
+remains. `shortest-match` keeps the first match it finds until a thread that
+started earlier matches; `longest-match` compares every match against the
+leftmost-longest one so far.
+
+In a byte regex, a Unicode class or dot consumes a whole 1-4 octet UTF-8
+scalar, a non-ASCII literal matches its octets one at a time, and `\R`
+consumes a CRLF pair, so threads leaving one position can resume at
+different positions. A thread that resumes past the next position is
+carried through each intermediate list at its own rank as a waiting entry,
+so the list at the position where it resumes is still in priority order.
+
+A thread is a program counter, the position it resumes at, and a row of
+capture slots in a `vm-queue`; the epsilon closure is an explicit stack whose
+`:save` frames restore the one slot they changed. The two queues, the stack,
+and the slot rows are allocated once per call and grow only to the peak
+number of live threads, so the bytes a `scan` conses do not grow with the
+input length; per call they are proportional to the program length times the
+capture slot count. `run-pike-vm-boolean`, which `is-match-p` uses when the
+lazy DFA does not apply, uses the same queues without slot rows.
+`run-pike-vm-set` and the incremental streaming matcher keep their own
+list-based loops.
+
+## Word boundaries in byte regexes
+
+A Unicode-aware `\b` in a byte regex applies UAX #29 word boundaries to the
+UTF-8 scalars around the position being tested. It decodes backward past
+Extend, Format, and ZWJ scalars until it holds two significant scalars, and
+past a run of regional indicators until the run ends; it decodes forward
+until it holds two significant scalars; either direction stops at the edge
+of the text. One test therefore costs time proportional to the local run of
+ignorable or regional-indicator scalars rather than to the buffer, and
+conses nothing unless that run exceeds 64 scalars. A `scan` with
+`:start`/`:end` pays for the scanned range plus that lookaround. When a
+scalar the rules need is not valid UTF-8, the ASCII-compatible
+word-character test decides that position; before 2.1.1, one invalid octet
+anywhere in the buffer switched every position to that test.
 
 ## Condition hierarchy
 

@@ -122,6 +122,7 @@
                (:file "nfa-test")
                (:file "pike-vm-test")
                (:file "lazy-dfa-prefilter-test")
+               (:file "pike-vm-differential-test")
                (:file "api-test")
                (:file "api-advanced-test")
                (:file "api-unicode-test")

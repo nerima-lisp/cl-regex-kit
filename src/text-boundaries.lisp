@@ -226,7 +226,9 @@ otherwise-equal word-character classifications as different objects."
   (defun %unicode-word-break-ignored-class-p (class)
     (member class (quote (:extend :format :zwj)) :test (function eq)))
 
-  (defun %unicode-word-boundary-p (text position)
+  (defun %unicode-word-boundary-p (text position &optional (length (length text)))
+    "Apply UAX #29 word boundaries at POSITION of TEXT, whose first LENGTH
+characters are the text."
     (labels
         ((class-at (index)
            (unicode-word-break-class (aref text index)))
@@ -251,7 +253,7 @@ otherwise-equal word-character classifications as different objects."
                    do (return (values cursor class))
                  finally (return (values nil nil))))
          (significant-after (index)
-           (loop for cursor from index below (length text)
+           (loop for cursor from index below length
                  for class = (class-at cursor)
                  unless (%unicode-word-break-ignored-class-p class)
                    do (return (values cursor class))
@@ -266,7 +268,7 @@ otherwise-equal word-character classifications as different objects."
                           (return count))
                  finally (return count))))
       (cond
-        ((or (zerop position) (= position (length text))) t)
+        ((or (zerop position) (= position length)) t)
         (t
          (let ((immediate-left-class (class-at (1- position)))
                (immediate-right-class (class-at position)))
@@ -367,24 +369,94 @@ otherwise-equal word-character classifications as different objects."
            (not (eq (word-character-p left t)
                     (word-character-p right t))))))
 
-  (defun %byte-unicode-word-boundary-p (text position)
-    (let ((characters (make-array 0 :adjustable t :fill-pointer 0))
-          (offsets (make-array 0 :adjustable t :fill-pointer 0))
-          (index 0))
-      (loop while (< index (length text))
-            do (vector-push-extend index offsets)
-               (multiple-value-bind (character end valid-p)
-                   (utf8-character-at text index)
+  (defun %byte-unicode-word-boundary-extent (text position)
+    "Return the octet range [BEGIN, END) of the UTF-8 scalars
+%UNICODE-WORD-BOUNDARY-P inspects around POSITION, the number of scalars on
+each side of POSITION, and true; or NIL when any of them is not valid UTF-8.
+
+The left side keeps decoding backward past Extend/Format/ZWJ scalars until
+it holds two significant scalars, and past a run of regional indicators
+until the run ends, since the rules count that run's parity; the right side
+stops after two significant scalars. Either side also stops at the edge of
+TEXT. The extent is therefore bounded by the local run of ignorable or
+regional-indicator scalars, not by TEXT's length."
+    (let ((begin position)
+          (end position)
+          (left-count 0)
+          (right-count 0)
+          (significant-left 0)
+          (significant-right 0)
+          (regional-run-p nil))
+      (loop while (and (plusp begin)
+                       (or (zerop left-count)
+                           regional-run-p
+                           (< significant-left 2)))
+            do (multiple-value-bind (character beginning valid-p)
+                   (utf8-character-before text begin)
                  (unless valid-p
-                   (return-from %byte-unicode-word-boundary-p
-                     (%byte-unicode-binary-word-boundary-p text position)))
-                 (vector-push-extend character characters)
-                 (setf index end)))
-      (vector-push-extend (length text) offsets)
-      (loop for character-index from 0 below (length offsets)
-            when (= position (aref offsets character-index))
-              do (return (%unicode-word-boundary-p characters character-index))
-            finally (return nil))))
+                   (return-from %byte-unicode-word-boundary-extent))
+                 (let ((class (unicode-word-break-class character)))
+                   (incf left-count)
+                   (unless (%unicode-word-break-ignored-class-p class)
+                     (incf significant-left)
+                     (setf regional-run-p
+                           (and (eq class :regional-indicator)
+                                (or (= significant-left 1) regional-run-p)))))
+                 (setf begin beginning)))
+      (loop while (and (< end (length text))
+                       (< significant-right 2))
+            do (multiple-value-bind (character next valid-p)
+                   (utf8-character-at text end)
+                 (unless valid-p
+                   (return-from %byte-unicode-word-boundary-extent))
+                 (incf right-count)
+                 (unless (%unicode-word-break-ignored-class-p
+                          (unicode-word-break-class character))
+                   (incf significant-right))
+                 (setf end next)))
+      (values begin end left-count right-count t)))
+
+  (defun %decode-utf8-into (window text begin end)
+    "Decode the valid UTF-8 octets TEXT[BEGIN, END) into simple-vector WINDOW.
+A simple-vector rather than a string because SBCL stack-allocates a
+DYNAMIC-EXTENT simple-vector but not a character string."
+    (loop with cursor = begin
+          for index from 0
+          while (< cursor end)
+          do (multiple-value-bind (character next) (utf8-character-at text cursor)
+               (setf (svref window index) character
+                     cursor next)))
+    window)
+
+  (defun %byte-unicode-word-boundary-p (text position)
+    "Apply UAX #29 word boundaries at octet POSITION of UTF-8 TEXT.
+
+Decodes only the scalars around POSITION that the rules read (see
+%BYTE-UNICODE-WORD-BOUNDARY-EXTENT), so the cost is independent of TEXT's
+length; the decoded window lives on the stack unless an unusually long run of
+ignorable scalars makes it large. A POSITION inside a scalar is never a
+boundary; when a scalar the rules need is not valid UTF-8, the
+ASCII-compatible binary word-character test decides instead."
+    (cond
+      ((and (< position (length text))
+            (utf8-continuation-octet-p (aref text position)))
+       nil)
+      (t
+       (multiple-value-bind (begin end left-count right-count valid-p)
+           (%byte-unicode-word-boundary-extent text position)
+         (cond
+           ((not valid-p)
+            (%byte-unicode-binary-word-boundary-p text position))
+           ((<= (+ left-count right-count) 64)
+            (let ((window (make-array 64 :initial-element nil)))
+              (declare (dynamic-extent window))
+              (%unicode-word-boundary-p (%decode-utf8-into window text begin end)
+                                        left-count
+                                        (+ left-count right-count))))
+           (t
+            (%unicode-word-boundary-p
+             (%decode-utf8-into (make-array (+ left-count right-count)) text begin end)
+             left-count)))))))
 
   (setf (symbol-function 'byte-unicode-word-boundary-p) (lambda (text position) (%byte-unicode-word-boundary-p text position)))
 
