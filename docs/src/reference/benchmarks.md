@@ -122,3 +122,17 @@ engine, on any host and over any number of runs.
 revision label. Its purpose is to catch a regression that breaks the benchmark
 path, not to produce a comparable measurement -- read the environment
 assignments in that check for the exact values it pins.
+
+## Allocation per match call
+
+Since 2.1.1, the bytes a `scan`, `captures`, `shortest-match`,
+`longest-match`, or non-DFA `is-match-p` call conses do not grow with the
+length of the searched range: the Pike VM's thread queues are sized by the
+number of live threads, not by the input (see
+[Architecture](architecture.md#pike-vm-thread-lists)). In 2.1.0 the same calls
+consed roughly 170 bytes per input element. A byte regex containing a
+Unicode-aware `\b` also no longer decodes the whole buffer at each boundary
+test, so a call restricted with `:start`/`:end` costs time proportional to
+that range rather than to the buffer. The test suite asserts both properties
+with `sb-ext:get-bytes-consed` over inputs of two sizes a hundredfold apart,
+in `t/pike-vm-differential-test.lisp`.

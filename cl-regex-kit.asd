@@ -12,7 +12,7 @@
   :author "takeokunn <bararararatty@gmail.com>"
   :maintainer "takeokunn <bararararatty@gmail.com>"
   :license "MIT"
-  :version "2.1.0"
+  :version "2.1.1"
   :homepage "https://github.com/nerima-lisp/cl-regex-kit"
   :bug-tracker "https://github.com/nerima-lisp/cl-regex-kit/issues"
   :source-control (:git "https://github.com/nerima-lisp/cl-regex-kit.git")
@@ -87,7 +87,7 @@
   :author "takeokunn <bararararatty@gmail.com>"
   :maintainer "takeokunn <bararararatty@gmail.com>"
   :license "MIT"
-  :version "2.1.0"
+  :version "2.1.1"
   :homepage "https://github.com/nerima-lisp/cl-regex-kit"
   :bug-tracker "https://github.com/nerima-lisp/cl-regex-kit/issues"
   :source-control (:git "https://github.com/nerima-lisp/cl-regex-kit.git")
@@ -104,7 +104,7 @@
   :author "takeokunn <bararararatty@gmail.com>"
   :maintainer "takeokunn <bararararatty@gmail.com>"
   :license "MIT"
-  :version "2.1.0"
+  :version "2.1.1"
   :homepage "https://github.com/nerima-lisp/cl-regex-kit"
   :bug-tracker "https://github.com/nerima-lisp/cl-regex-kit/issues"
   :source-control (:git "https://github.com/nerima-lisp/cl-regex-kit.git")
@@ -122,6 +122,7 @@
                (:file "nfa-test")
                (:file "pike-vm-test")
                (:file "lazy-dfa-prefilter-test")
+               (:file "pike-vm-differential-test")
                (:file "api-test")
                (:file "api-advanced-test")
                (:file "api-unicode-test")

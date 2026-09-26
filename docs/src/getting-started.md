@@ -7,7 +7,7 @@
 ```nix
 # flake.nix
 inputs.cl-regex-kit = {
-  url = "github:nerima-lisp/cl-regex-kit/v2.1.0";
+  url = "github:nerima-lisp/cl-regex-kit/v2.1.1";
   inputs.nixpkgs.follows = "nixpkgs";
 };
 ```
