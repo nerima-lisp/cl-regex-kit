@@ -128,6 +128,38 @@ bypassing the literal prefilter and the lazy DFA entirely."
     (expect (cl-regex-kit::regex-lazy-dfa regex) :to-be-truthy)
     (expect (is-match-p regex (ascii-octets "axb")) :to-be-truthy)))
 
+(it
+  "uses the anchored DFA semantics for full matches"
+  (let ((regex (compile-regex "[-+]?[0-9]+")))
+    (expect (full-match-p regex "42") :to-be-truthy)
+    (expect (full-match-p regex "+42") :to-be-truthy)
+    (expect (full-match-p regex "x42") :to-be nil)
+    (expect (full-match-p regex "id=42!" :start 3 :end 5) :to-be-truthy)
+    (expect (full-match-p regex "id=42!" :start 3 :end 6) :to-be nil)
+    (expect (full-match-p (compile-regex "") "") :to-be-truthy)
+    (expect (full-match-p (compile-regex "") "x" :start 1 :end 1) :to-be-truthy)))
+
+(it
+  "keeps Pike VM semantics for ineligible full matches"
+  (dolist (pattern (list "^ab$" "\\bab\\b" "(a)\\1" "(?<=a)b"))
+    (let ((regex (compile-regex pattern)))
+      (expect (full-match-p regex "ab")
+              :to-equal
+              (not (null (full-match regex "ab")))))))
+
+(it-property
+  "full-match-p agrees with the Pike VM full-match result"
+  ((pattern
+     (gen-member (list "needle" "cat|dog" "[0-9]{2,4}[a-z]+"
+                       "(?i)hello" "colou?r" "(?:ab)+c" "a*b*c*"
+                       "(?:é|中)+")))
+    (text (gen-string :min-length 0 :max-length 24
+                      :alphabet "abcdefoxyz01234 é中")))
+  (let ((regex (compile-regex pattern)))
+    (expect (full-match-p regex text)
+            :to-equal
+            (not (null (full-match regex text))))))
+
 ;;; -- Differential property tests ----------------------------------------
 
 (it-property

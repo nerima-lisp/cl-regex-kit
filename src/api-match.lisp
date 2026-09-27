@@ -252,5 +252,16 @@ to refer to the original TEXT, not the selected range."
            result))))
 
 (defun full-match-p (regex text &key (start 0) end timeout)
-  "Return true when REGEX has a match spanning exactly [START, END) in TEXT."
-  (not (null (full-match regex text :start start :end end :timeout timeout))))
+  "Return true when REGEX has a match spanning exactly [START, END) in TEXT.
+
+When the regular program is eligible for the lazy DFA, this uses an anchored
+boolean DFA walk. Other programs retain the full-match Pike VM path."
+  (check-type regex regex)
+  (call-with-validated-match
+   regex text start end timeout
+   (lambda (limit)
+     (let ((dfa (regex-lazy-dfa regex)))
+       (if dfa
+           (run-lazy-dfa-full-match-boolean dfa text start limit)
+         (not (null (full-match regex text :start start :end limit
+                                :timeout nil))))))))

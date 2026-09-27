@@ -254,7 +254,8 @@ the advanced executor entirely for an input range the required literals
 prove cannot match.
 
 `lazy-dfa.lisp` builds a bounded subset-construction cache per `regex`,
-consulted only from `is-match-p`/`is-match-at`. A DFA state is a closed set
+consulted from `is-match-p`/`is-match-at` and, with reseeding disabled, from
+`full-match-p`. A DFA state is a closed set
 of live program counters; because an unanchored search reseeds a fresh
 thread at program counter 0 at every position, that reseed folds into the
 transition function itself, making each transition a pure function of
@@ -281,6 +282,12 @@ is self-contained and safe to publish regardless of which build wins. The
 DFA's shared mutable state and transition tables are additionally guarded
 by a lock per `lazy-dfa`, since a compiled `regex` is meant to be reused
 concurrently and those tables keep growing after the cache is first built.
+
+The anchored `full-match-p` walk starts with the closure at `start`, consumes
+exactly the selected range without adding fresh start threads, and accepts only
+if the final closure contains `:match`. This preserves the fixed-range
+semantics while reusing the same bounded state cache; exceeding the state cap
+still computes transitions without retaining new states.
 
 Both additions are pure performance optimizations: neither changes any
 public function's return value, only how quickly a definite non-match or a

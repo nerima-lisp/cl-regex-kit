@@ -149,7 +149,8 @@ patterns signal `fuzzy-match-unsupported`.
   reduced to a single member, or a case-insensitive literal folded to its
   case-invariant forms; each would still need to stay conservative, and none
   changes the prefilter's soundness, only its pruning power
-- The lazy DFA is consulted only for `is-match-p`/`is-match-at`. Extending it
+- The lazy DFA is consulted for boolean existence and exact-range matching
+  (`is-match-p`/`is-match-at` and eligible `full-match-p`). Extending it
   to report a match's end position (for `scan`/`shortest-match` without
   captures) is possible in principle -- an accepting state's PC set already
   determines it -- but needs its own correctness argument for interaction

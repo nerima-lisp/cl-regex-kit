@@ -46,7 +46,7 @@ whether that set already contains a :MATCH instruction; TRANSITIONS caches
 this state's outgoing (state, element) -> DFA-STATE steps."
   (pcs nil :type list :read-only t)
   (accept-p nil :read-only t)
-  (transitions (make-hash-table :test 'eql) :read-only t))
+  (transitions (make-hash-table :test 'equal) :read-only t))
 
 (defstruct lazy-dfa
   "Per-REGEX cache of DFA-STATE objects. LOCK serializes every access to
@@ -118,22 +118,31 @@ only caching beyond +LAZY-DFA-MAX-STATES+ is skipped."
   (cl-concurrent-kit:with-lock-held ((lazy-dfa-lock dfa))
     (%dfa-state-for-seeds dfa text start length (list 0))))
 
-(defun dfa-transition (dfa state text position length element)
-  "Return the DFA-STATE reached from STATE by consuming ELEMENT at POSITION,
-including the fresh PC-0 seed every position of an unanchored search adds."
+(defun dfa-transition (dfa state text position length element &optional anchored-p)
+  "Return the DFA-STATE reached from STATE by consuming ELEMENT at POSITION."
   (cl-concurrent-kit:with-lock-held ((lazy-dfa-lock dfa))
-    (or (gethash element (dfa-state-transitions state))
-        (let ((successors (list 0))
-              (program (lazy-dfa-program dfa))
-              (never-newline-p (lazy-dfa-never-newline-p dfa)))
-          (dolist (pc (dfa-state-pcs state))
-            (let ((instruction (aref program pc)))
-              (when (and (member (inst-op instruction) '(:char :class :any) :test #'eq)
-                         (dfa-instruction-accepts-p instruction element never-newline-p))
-                (push (inst-b instruction) successors))))
-          (let ((next (%dfa-state-for-seeds dfa text (1+ position) length successors)))
-            (setf (gethash element (dfa-state-transitions state)) next)
-            next)))))
+    (let ((key (if anchored-p (cons :anchored element) element)))
+      (or (gethash key (dfa-state-transitions state))
+          (let ((successors (if anchored-p nil (list 0)))
+                (program (lazy-dfa-program dfa))
+                (never-newline-p (lazy-dfa-never-newline-p dfa)))
+            (dolist (pc (dfa-state-pcs state))
+              (let ((instruction (aref program pc)))
+                (when (and (member (inst-op instruction) '(:char :class :any) :test #'eq)
+                           (dfa-instruction-accepts-p instruction element never-newline-p))
+                  (push (inst-b instruction) successors))))
+            (let ((next (%dfa-state-for-seeds dfa text (1+ position) length successors)))
+              (setf (gethash key (dfa-state-transitions state)) next)
+              next))))))
+
+(defun run-lazy-dfa-full-match-boolean (dfa text start limit)
+  "Return true when DFA's program matches exactly [START, LIMIT)."
+  (let ((length (length text)))
+    (loop with state = (lazy-dfa-initial-state dfa text start length)
+          for position from start below limit
+          do (setf state (dfa-transition dfa state text position length
+                                         (aref text position) t))
+          finally (return (dfa-state-accept-p state)))))
 
 (defun run-lazy-dfa-boolean (dfa text start limit)
   "Return true when DFA's program has an unanchored match in TEXT within

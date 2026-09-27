@@ -630,7 +630,9 @@ entire selected `[start,end)` range. It uses leftmost-longest selection at the
 range start, so a complete alternative remains visible even when an earlier
 alternative is shorter. `full-match-p` is its boolean predicate. Omitting
 `end` selects the rest of `text`. Anchors still use the original input's
-boundaries, rather than treating the selected range as a new string.
+boundaries, rather than treating the selected range as a new string. For
+regular programs eligible for the lazy DFA, `full-match-p` uses an anchored
+boolean DFA walk; other programs retain the Pike VM or advanced executor path.
 
 ### `match`
 
